@@ -256,7 +256,12 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
     // While waiting for the sender to validate the event, hold off any others.
     when(EventLogBusyValidating, stateTimeout = validationTimeout)(handleQuery orElse {
       // Validation succeeded
-      case Event(v @ ValidationResponse(wasAccepted, event, _), EventLogData(Some((eventUnderConsideration, replyTo)), _)) if event == eventUnderConsideration =>
+      case Event(v @ ValidationResponse(wasAccepted, event, _), EventLogData(Some((eventUnderConsideration, _)), _)) if event == eventUnderConsideration =>
+        // We're going to reply to `sender` instead of the stored `replyTo`.
+        // This is to enable the client to operate using the `ask` pattern,
+        // which uses a fresh actorRef for each round.
+        val replyTo = sender()
+
         val nextState = goto(EventLogAvailable)
         val nextStateWithApply =
           if (wasAccepted) {
@@ -340,6 +345,9 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
 
   /**
     * All possible modifications to the EventLog stored data and state
+    *
+    * `replyTo` is only stored for timeouts. We reply to `sender` instead in
+    * normal operation.
     */
   sealed trait EventLogInternalEvent
   case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent

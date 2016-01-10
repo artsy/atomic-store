@@ -158,7 +158,7 @@ class AtomicEventStoreSpec
         log ! reply.response(toAccept)
         val result = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
         assert(result.wasAccepted == toAccept)
-        assert(result.storedEventList.lastOption.map(_.event).contains(event))
+        assert(result.storedEventList.lastOption.map(_.data).contains(event))
       }
     }
 
@@ -177,7 +177,7 @@ class AtomicEventStoreSpec
         expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
 
         log ! eventStore.QueryEvents
-        expectMsgPF(hint = "empty list of events") { case List(eventStore.StoredEvent(eventInStore, _)) if eventInStore == event  => }
+        expectMsgPF(hint = "empty list of events") { case List(Timestamped(eventInStore, _)) if eventInStore == event  => }
       }
     }
 
@@ -197,7 +197,7 @@ class AtomicEventStoreSpec
         val result = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
         assert(result.wasAccepted == toAccept)
         assert(result.reason.contains(reason))
-        assert(!result.storedEventList.exists(_.event == event))
+        assert(!result.storedEventList.exists(_.data == event))
       }
     }
 
@@ -282,10 +282,10 @@ class AtomicEventStoreSpec
         log ! eventStore.QueryEvents
         val events = expectMsgPF(hint = "empty list of events") {
           case storedEvents: List[_] => storedEvents.collect {
-            case eventStore.StoredEvent(event, _) => event
+            case Timestamped(event, _) => event
           }
         }
-        expect(events)(List(event1, event2, event3))
+        events should be(List(event1, event2, event3))
       }
     }
   }
@@ -307,16 +307,16 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
-        assert(result1.storedEventList.map(_.event) === List(event1))
+        assert(result1.storedEventList.map(_.data) === List(event1))
 
         receptionist ! reply2.response(didPass = true)
         val result2 = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
-        assert(result2.storedEventList.map(_.event) === List(event2))
+        assert(result2.storedEventList.map(_.data) === List(event2))
 
         receptionist ! eventStore.eventsForScopeQuery(testScope1)
         val queryResult1 = expectMsgPF(hint = "list of one event") {
           case storedEvents: List[_] => storedEvents.collect {
-            case eventStore.StoredEvent(event, _) => event
+            case Timestamped(event, _) => event
           }
         }
         assert(queryResult1 === List(event1))
@@ -324,7 +324,7 @@ class AtomicEventStoreSpec
         receptionist ! eventStore.eventsForScopeQuery(testScope2)
         val queryResult2 = expectMsgPF(hint = "list of one event") {
           case storedEvents: List[_] => storedEvents.collect {
-            case eventStore.StoredEvent(event, _) => event
+            case Timestamped(event, _) => event
           }
         }
         assert(queryResult2 === List(event2))
@@ -342,7 +342,7 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
-        assert(result1.storedEventList.map(_.event) === List(event1))
+        assert(result1.storedEventList.map(_.data) === List(event1))
       }
     }
 
@@ -357,7 +357,7 @@ class AtomicEventStoreSpec
 
         receptionist ! eventStore.Envelope("other scope", reply1.response(didPass = true))
         val result1 = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
-        assert(result1.storedEventList.map(_.event) === List(event1))
+        assert(result1.storedEventList.map(_.data) === List(event1))
       }
     }
 
@@ -372,7 +372,7 @@ class AtomicEventStoreSpec
 
         lastSender ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
-        assert(result1.storedEventList.map(_.event) === List(event1))
+        assert(result1.storedEventList.map(_.data) === List(event1))
       }
     }
 
@@ -391,7 +391,7 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
-        assert(result1.storedEventList.map(_.event) === List(event1))
+        assert(result1.storedEventList.map(_.data) === List(event1))
 
         val event2 = TestEvent2(testScope1)
         receptionist ! eventStore.StoreIfValid(event2)
@@ -399,12 +399,12 @@ class AtomicEventStoreSpec
 
         receptionist ! reply2.response(didPass = true)
         val result2 = expectMsgPF(hint = "Result") { case result: eventStore.Result => result }
-        assert(result2.storedEventList.map(_.event) === List(event1, event2))
+        assert(result2.storedEventList.map(_.data) === List(event1, event2))
 
         receptionist ! eventStore.eventsForScopeQuery(testScope1)
         val queryResult1 = expectMsgPF(hint = "list of one event") {
           case storedEvents: List[_] => storedEvents.collect {
-            case eventStore.StoredEvent(event, _) => event
+            case Timestamped(event, _) => event
           }
         }
         assert(queryResult1 === List(event1, event2))
@@ -415,7 +415,7 @@ class AtomicEventStoreSpec
         receptionist ! eventStore.eventsForScopeQuery(testScope1)
         val queryResult2 = expectMsgPF(hint = "list of one event") {
           case storedEvents: List[_] => storedEvents.collect {
-            case eventStore.StoredEvent(event, _) => event
+            case Timestamped(event, _) => event
           }
         }
         assert(queryResult2 === List(event1, event2))

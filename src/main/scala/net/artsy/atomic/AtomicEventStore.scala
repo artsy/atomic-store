@@ -50,17 +50,6 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
   /** The props for instantiating the AtomicEventStore network */
   val receptionistProps = Props(new Receptionist(EventLog.props))
 
-  ////////////////////////
-  // Provided data types
-  //
-
-  /**
-   * An [[EventType]], along with the time it was accepted
-   * @param event the domain event
-   * @param createdAt the timestamp
-   */
-  case class StoredEvent(event: EventType, createdAt: DateTime)
-
   /////////////
   // Messages
   //
@@ -130,7 +119,7 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
    * @param prospectiveEvent the event to consider
    * @param pastEvents all prior events
    */
-  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[StoredEvent]) {
+  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[Timestamped[EventType]]) {
     def response(didPass: Boolean, reason: Option[ValidationReason] = None) =
       ValidationResponse(didPass, prospectiveEvent, reason)
   }
@@ -144,7 +133,7 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
    */
   case class ValidationResponse(validationDidPass: Boolean, event: EventType, reason: Option[ValidationReason]) extends ScopedMessage {
     val scopeId = implicitly[Scoped[EventType]].scopeIdentifier(event)
-    def toResult(events: Seq[StoredEvent]): Result =
+    def toResult(events: Seq[Timestamped[EventType]]): Result =
       Result(validationDidPass, event, events, reason)
   }
 
@@ -155,7 +144,7 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
     *                  the prospective one, iff accepted)
     * @param reason the validation reason
     */
-  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[StoredEvent], reason: Option[ValidationReason])
+  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[Timestamped[EventType]], reason: Option[ValidationReason])
 
   /** Diagnostic query to inspect live log actors */
   case object GetLiveLogScopes
@@ -265,7 +254,7 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
         val nextState = goto(EventLogAvailable)
         val nextStateWithApply =
           if (wasAccepted) {
-            nextState.applying(StoreEvent(StoredEvent(event, DateTime.now())))
+            nextState.applying(StoreEvent(Timestamped(event, DateTime.now())))
           } else {
             nextState.applying(DoNotStoreEvent)
           }
@@ -332,14 +321,14 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
     *                                consideration, to ensure atomicity.
     * @param eventList list of events stored in the scope
     */
-  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[StoredEvent]) {
+  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[Timestamped[EventType]]) {
     def consideringEventFromSender(event: EventType, replyTo: ActorRef): EventLogData =
       copy(eventUnderConsiderationAndSender = Some(event, replyTo))
 
     def consideringNothing: EventLogData =
       copy(eventUnderConsiderationAndSender = None)
 
-    def storingEvent(eventToStore: StoredEvent): EventLogData =
+    def storingEvent(eventToStore: Timestamped[EventType]): EventLogData =
       consideringNothing.copy(eventList = eventList :+ eventToStore)
   }
 
@@ -351,6 +340,6 @@ class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
     */
   sealed trait EventLogInternalEvent
   case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent
-  case class StoreEvent(storedEvent: StoredEvent) extends EventLogInternalEvent
+  case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent
   case object DoNotStoreEvent extends EventLogInternalEvent
 }

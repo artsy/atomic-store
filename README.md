@@ -17,7 +17,7 @@ At the moment, the only thing you can do is execute the tests, by running `test`
 
 ## Integrating into a project
 
-Eventually, this will be published to a public Maven repository for proper versioning, but at the moment, it can be included within another project directly via Github:
+Eventually, this will be published to a public Maven repository for proper versioning, but at the moment, it can be included within another project directly via GitHub:
 
 ```
 RootProject(uri("git://github.com/artsy/atomic-store.git"))

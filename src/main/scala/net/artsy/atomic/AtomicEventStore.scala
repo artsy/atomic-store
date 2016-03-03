@@ -43,7 +43,7 @@ import scala.reflect.ClassTag
 
   * @param timeoutReason reason object for validations that timeout
   */
-abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
+abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, ValidationReason](
   timeoutReason: ValidationReason
 ) {
   /**
@@ -145,7 +145,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
     * @param wasAccepted true iff validation succeeded before the timeout
     * @param prospectiveEvent the event sent in the original request
     * @param storedEventList all accepted events at the time of response (including
-    *                  the prospective one, iff accepted)
+    *                  the prospective one, in the final position, iff accepted)
     * @param reason the validation reason
     */
   case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[Timestamped[EventType]], reason: Option[ValidationReason])
@@ -170,16 +170,20 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
       val (newLogs, targetLog) = logs.get(scope) match {
         case Some(foundLog) => (logs, foundLog)
         case None =>
+          println(s"Instantiating log")
           // Recreate the log, which will recall all preexisting events
           val materializedLog = context.actorOf(logProps(scope, validationTimeout), scope)
 
           // Set up a death watch, so we can remove logs that are terminated
           context.watch(materializedLog)
 
-          (logs + (scope -> materializedLog), materializedLog)
+          val temp = (logs + (scope -> materializedLog), materializedLog)
+          println(s"Log instantiated.")
+          temp
       }
 
       logs = newLogs
+      println(s"Logs: $logs")
       targetLog
     }
 
@@ -189,6 +193,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
 
       case Terminated(deadActorRef) =>
         logs = logs.filterNot { case (_, ref) => ref == deadActorRef }
+        println(s"Log terminated. Logs: $logs")
 
       case GetLiveLogScopes =>
         sender() ! logs.keys.toSet
@@ -227,6 +232,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
       */
     val handleQuery: StateFunction = {
       case Event(QueryEvents, data) =>
+        println(s"QueryEvents (data: $data)")
         stay().replying(data.eventList)
     }
 
@@ -298,6 +304,8 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
       case EventLogBusyValidating -> EventLogAvailable => unstashAll()
     }
 
+    override def onRecoveryCompleted() = println("Recovery completed")
+
     // Don't really understand why this is needed to fulfill the trait, but whatevs
     def domainEventClassTag: ClassTag[EventLogInternalEvent] = implicitly[ClassTag[EventLogInternalEvent]]
   }
@@ -342,7 +350,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
     * `replyTo` is only stored for timeouts. We reply to `sender` instead in
     * normal operation.
     */
-  sealed trait EventLogInternalEvent
+  sealed trait EventLogInternalEvent extends Serializable
   case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent
   case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent
   case object DoNotStoreEvent extends EventLogInternalEvent

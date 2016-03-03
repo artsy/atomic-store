@@ -315,6 +315,11 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
 
     override def onRecoveryCompleted() = println("Recovery completed")
 
+    override protected def onPersistFailure(cause: Throwable, event: Any, seqNr: Long): Unit = {
+      log.error(cause, "Failed to persist event type [{}] with sequence number [{}] for persistenceId [{}].",
+        event.getClass.getName, seqNr, persistenceId)
+    }
+
     // Don't really understand why this is needed to fulfill the trait, but whatevs
     def domainEventClassTag: ClassTag[EventLogInternalEvent] = implicitly[ClassTag[EventLogInternalEvent]]
   }

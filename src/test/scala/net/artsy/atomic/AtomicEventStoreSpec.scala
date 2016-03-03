@@ -1,7 +1,9 @@
 package net.artsy.atomic
 
 import akka.actor._
+import akka.persistence.inmemory.extension.DaoRegistry
 import akka.testkit._
+import org.joda.time.DateTime
 import org.scalatest._
 import scala.concurrent.duration.{FiniteDuration, DurationInt}
 
@@ -11,6 +13,24 @@ class EchoActor extends Actor {
     case msg => sender() ! msg
   }
 }
+
+
+// Declare test types for events and validations
+
+sealed trait TestEvent extends Serializable { def scopeId: String }
+case class TestEvent1(scopeId: String) extends TestEvent
+case class TestEvent2(scopeId: String) extends TestEvent
+object TestEvent extends Serializable {
+  implicit val testEventScoped: Scoped[TestEvent] = new Scoped[TestEvent] {
+    def scopeIdentifier(domainEvent: TestEvent): String = domainEvent.scopeId
+  }
+}
+
+sealed trait ValidationReason extends Serializable
+case object Timeout extends ValidationReason
+case object ArbitraryRejectionReason extends ValidationReason
+
+object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout) with Serializable
 
 class AtomicEventStoreSpec
   extends ImplicitSender with WordSpecLike with Matchers with BeforeAndAfterAll with TestKitBase with Serializable {
@@ -37,22 +57,7 @@ class AtomicEventStoreSpec
     }
   }
 
-  // Declare test types for events and validations
-
-  sealed trait TestEvent extends Serializable { def scopeId: String }
-  case class TestEvent1(scopeId: String) extends TestEvent
-  case class TestEvent2(scopeId: String) extends TestEvent
-  implicit val testEventScoped: Scoped[TestEvent] = new Scoped[TestEvent] {
-    def scopeIdentifier(domainEvent: TestEvent): String = domainEvent.scopeId
-  }
-
-  sealed trait ValidationReason extends Serializable
-  case object Timeout extends ValidationReason
-  case object ArbitraryRejectionReason extends ValidationReason
-
-
   val validationTimeout = 3.second
-  object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout) with Serializable
   import TestEventStore._
 
   // Test helper code
@@ -422,6 +427,17 @@ class AtomicEventStoreSpec
           }
         }
         queryResult1 shouldEqual List(event1, event2)
+
+        import java.io._
+        val out = new ObjectOutputStream(new FileOutputStream("/Users/alan/projects/test.obj"))
+        out.writeObject(event1)
+        out.writeObject(Timestamped(event1, DateTime.now()))
+        out.writeObject(StoreEvent(Timestamped(event1, DateTime.now())))
+        out.writeObject(ConsiderEventFromSender(event1, testActor))
+        out.writeObject(DoNotStoreEvent)
+        out.writeObject(EventLogAvailable)
+        out.writeObject(EventLogBusyValidating)
+        out.close()
 
         cleanup(logRef)
 

@@ -4,7 +4,7 @@ import akka.actor._
 import akka.testkit._
 import org.joda.time.DateTime
 import org.scalatest._
-import scala.concurrent.duration.{FiniteDuration, DurationInt}
+import scala.concurrent.duration.{ FiniteDuration, DurationInt }
 
 /** Simply echos incoming messages */
 class EchoActor extends Actor {
@@ -12,7 +12,6 @@ class EchoActor extends Actor {
     case msg => sender() ! msg
   }
 }
-
 
 // Declare test types for events and validations. These have to be declared
 // outside the Spec's scope for serialization purposes.
@@ -33,10 +32,10 @@ object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Time
 
 class AtomicEventStoreSpec
   extends ImplicitSender
-    with WordSpecLike
-    with Matchers
-    with BeforeAndAfterAll
-    with TestKitBase {
+  with WordSpecLike
+  with Matchers
+  with BeforeAndAfterAll
+  with TestKitBase {
 
   import TestEventStore._
 
@@ -59,7 +58,7 @@ class AtomicEventStoreSpec
 
   // Used to isolate scopes from one test to another so we don't have to clean
   // up
-  object UniqueId  {
+  object UniqueId {
     private var count = 0
     def next: Int = synchronized {
       val last = count
@@ -80,7 +79,7 @@ class AtomicEventStoreSpec
   }
 
   /** Loan fixture for setting up receptionist with dummy logs */
-  def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any)  {
+  def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any) {
     // For test purposes, inject a factory that makes spies instead of logs for
     // the receptionists children
     val dummyLogFactory = (_: String, _: FiniteDuration) => Props(new EchoActor)
@@ -220,7 +219,7 @@ class AtomicEventStoreSpec
         expectMsgPF(hint = "Result") { case result: Result => result }
 
         log ! QueryEvents
-        expectMsgPF(hint = "empty list of events") { case List(Timestamped(eventInStore, _)) if eventInStore == event  => }
+        expectMsgPF(hint = "empty list of events") { case List(Timestamped(eventInStore, _)) if eventInStore == event => }
       }
     }
 

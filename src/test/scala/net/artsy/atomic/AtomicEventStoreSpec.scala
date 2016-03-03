@@ -2,8 +2,9 @@ package net.artsy.atomic
 
 import akka.actor._
 import akka.testkit._
+import org.joda.time.DateTime
 import org.scalatest._
-import scala.concurrent.duration.{FiniteDuration, DurationInt}
+import scala.concurrent.duration.{ FiniteDuration, DurationInt }
 
 /** Simply echos incoming messages */
 class EchoActor extends Actor {
@@ -12,10 +13,35 @@ class EchoActor extends Actor {
   }
 }
 
-class AtomicEventStoreSpec
-  extends ImplicitSender with WordSpecLike with Matchers with BeforeAndAfterAll with TestKitBase {
+// Declare test types for events and validations. These have to be declared
+// outside the Spec's scope for serialization purposes.
+sealed trait TestEvent extends Serializable { def scopeId: String }
+case class TestEvent1(scopeId: String) extends TestEvent
+case class TestEvent2(scopeId: String) extends TestEvent
+object TestEvent extends Serializable {
+  implicit val testEventScoped: Scoped[TestEvent] = new Scoped[TestEvent] {
+    def scopeIdentifier(domainEvent: TestEvent): String = domainEvent.scopeId
+  }
+}
 
+sealed trait ValidationReason extends Serializable
+case object Timeout extends ValidationReason
+case object ArbitraryRejectionReason extends ValidationReason
+
+object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout)
+
+class AtomicEventStoreSpec
+  extends ImplicitSender
+  with WordSpecLike
+  with Matchers
+  with BeforeAndAfterAll
+  with TestKitBase {
+
+  import TestEventStore._
+
+  //
   // Akka boilerplate
+  //
 
   implicit lazy val system = ActorSystem()
 
@@ -23,41 +49,37 @@ class AtomicEventStoreSpec
     TestKit.shutdownActorSystem(system)
   }
 
-  // Declare test types for events and validations
-
-  sealed trait TestEvent { def scopeId: String }
-  case class TestEvent1(scopeId: String) extends TestEvent
-  case class TestEvent2(scopeId: String) extends TestEvent
-  implicit val testEventScoped: Scoped[TestEvent] = new Scoped[TestEvent] {
-    def scopeIdentifier(domainEvent: TestEvent): String = domainEvent.scopeId
-  }
-
-  sealed trait ValidationReason
-  case object Timeout extends ValidationReason
-  case object ArbitraryRejectionReason extends ValidationReason
-
-
-  val validationTimeout = 100.milliseconds
-  object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout)
-  import TestEventStore._
-
+  //
   // Test helper code
+  //
 
+  val validationTimeout = 1.second
   val defaultTimeout = 1.second
 
   // Used to isolate scopes from one test to another so we don't have to clean
   // up
   object UniqueId {
     private var count = 0
-    def next: Int = {
+    def next: Int = synchronized {
       val last = count
       count += 1
       last
     }
   }
 
+  /** Kills an actor and waits for it to die */
+  def cleanup(actors: ActorRef*): Unit = {
+    val tp = TestProbe()
+    actors.foreach { (actor: ActorRef) ⇒
+      tp.watch(actor)
+      actor ! PoisonPill
+      tp.expectTerminated(actor)
+      tp.unwatch(actor)
+    }
+  }
+
   /** Loan fixture for setting up receptionist with dummy logs */
-  def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any)  {
+  def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any) {
     // For test purposes, inject a factory that makes spies instead of logs for
     // the receptionists children
     val dummyLogFactory = (_: String, _: FiniteDuration) => Props(new EchoActor)
@@ -76,6 +98,25 @@ class AtomicEventStoreSpec
     testCode(logMaker)
   }
 
+  "TestEvent events" must {
+    "be serializable" in {
+      val serialization = akka.serialization.SerializationExtension(system)
+      def serialize[A <: AnyRef](obj: A) = {
+        val serializer = serialization.findSerializerFor(obj)
+        serializer.toBinary(obj)
+      }
+
+      val event1 = TestEvent1("blah")
+      serialize(event1)
+      serialize(Timestamped(event1, DateTime.now()))
+      serialize(TestEventStore.ConsiderEventFromSender(event1, testActor))
+      serialize(TestEventStore.StoreEvent(Timestamped(event1, DateTime.now())))
+      serialize(TestEventStore.DoNotStoreEvent)
+      serialize(TestEventStore.EventLogAvailable)
+      serialize(TestEventStore.EventLogBusyValidating)
+    }
+  }
+
   "Receptionist" must {
     val scope = "testScope"
 
@@ -83,7 +124,7 @@ class AtomicEventStoreSpec
       within(defaultTimeout) {
         receptionist ! GetLiveLogScopes
         expectMsgPF() {
-          case logScopes: Set[_] => assert(logScopes.isEmpty)
+          case logScopes: Set[_] => logScopes.isEmpty shouldBe true
         }
       }
     }
@@ -97,7 +138,7 @@ class AtomicEventStoreSpec
 
         receptionist ! GetLiveLogScopes
         expectMsgPF() {
-          case logScopes: Set[_] => assert(logScopes.size === 1)
+          case logScopes: Set[_] => logScopes.size shouldEqual 1
         }
       }
     }
@@ -106,7 +147,7 @@ class AtomicEventStoreSpec
       within(defaultTimeout) {
         receptionist ! GetLiveLogScopes
         val logScopes1 = expectMsgPF(hint = "empty scope set") { case logScopes: Set[_] => logScopes }
-        assert(logScopes1.size === 0)
+        logScopes1.size shouldEqual 0
 
         val commandMessage = StoreIfValid(TestEvent1(scope))
         receptionist ! commandMessage
@@ -119,7 +160,7 @@ class AtomicEventStoreSpec
 
         receptionist ! GetLiveLogScopes
         val logScopes2 = expectMsgPF(hint = "scope set with one scope") { case logScopes: Set[_] => logScopes }
-        assert(logScopes2.size === 1)
+        logScopes2.size shouldEqual 1
 
         // Terminate the log
         dummyLogActorRef ! PoisonPill
@@ -130,7 +171,7 @@ class AtomicEventStoreSpec
 
         receptionist ! GetLiveLogScopes
         val logScopes3 = expectMsgPF(hint = "empty scope set") { case logScopes: Set[_] => logScopes }
-        assert(logScopes3.size === 0)
+        logScopes3.size shouldEqual 0
       }
     }
   }
@@ -158,8 +199,8 @@ class AtomicEventStoreSpec
 
         log ! reply.response(toAccept)
         val result = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result.wasAccepted == toAccept)
-        assert(result.storedEventList.lastOption.map(_.data).contains(event))
+        result.wasAccepted shouldEqual toAccept
+        result.storedEventList.lastOption.map(_.data).contains(event) shouldBe true
       }
     }
 
@@ -178,7 +219,7 @@ class AtomicEventStoreSpec
         expectMsgPF(hint = "Result") { case result: Result => result }
 
         log ! QueryEvents
-        expectMsgPF(hint = "empty list of events") { case List(Timestamped(eventInStore, _)) if eventInStore == event  => }
+        expectMsgPF(hint = "empty list of events") { case List(Timestamped(eventInStore, _)) if eventInStore == event => }
       }
     }
 
@@ -196,9 +237,9 @@ class AtomicEventStoreSpec
 
         log ! reply.response(toAccept, Some(reason))
         val result = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result.wasAccepted == toAccept)
-        assert(result.reason.contains(reason))
-        assert(!result.storedEventList.exists(_.data == event))
+        result.wasAccepted shouldEqual toAccept
+        result.reason.contains(reason) shouldBe true
+        result.storedEventList.exists(_.data == event) shouldBe false
       }
     }
 
@@ -215,14 +256,14 @@ class AtomicEventStoreSpec
         log ! commandMessage2
 
         val reply1 = expectMsgPF(hint = "ValidationRequest for first event") { case reply: ValidationRequest => reply }
-        assert(reply1.prospectiveEvent == event1)
+        reply1.prospectiveEvent shouldEqual event1
 
         log ! reply1.response(didPass = true)
         val result = expectMsgPF(hint = "Result for first event") { case result: Result => result }
-        assert(result.prospectiveEvent == event1)
+        result.prospectiveEvent shouldEqual event1
 
         val reply2 = expectMsgPF(hint = "ValidationRequest for second event") { case reply: ValidationRequest => reply }
-        assert(reply2.prospectiveEvent == event2)
+        reply2.prospectiveEvent shouldEqual event2
       }
     }
 
@@ -237,7 +278,7 @@ class AtomicEventStoreSpec
         log ! commandMessage1
 
         val reply1 = expectMsgPF(hint = "ValidationRequest for first event") { case reply: ValidationRequest => reply }
-        assert(reply1.prospectiveEvent == event1)
+        reply1.prospectiveEvent shouldEqual event1
 
         log ! PoisonPill
         expectMsgPF(hint = "terminated message") { case Terminated(`log`) => }
@@ -308,11 +349,11 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result1.storedEventList.map(_.data) === List(event1))
+        result1.storedEventList.map(_.data) shouldEqual List(event1)
 
         receptionist ! reply2.response(didPass = true)
         val result2 = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result2.storedEventList.map(_.data) === List(event2))
+        result2.storedEventList.map(_.data) shouldEqual List(event2)
 
         receptionist ! eventsForScopeQuery(testScope1)
         val queryResult1 = expectMsgPF(hint = "list of one event") {
@@ -320,7 +361,7 @@ class AtomicEventStoreSpec
             case Timestamped(event, _) => event
           }
         }
-        assert(queryResult1 === List(event1))
+        queryResult1 shouldEqual List(event1)
 
         receptionist ! eventsForScopeQuery(testScope2)
         val queryResult2 = expectMsgPF(hint = "list of one event") {
@@ -328,7 +369,7 @@ class AtomicEventStoreSpec
             case Timestamped(event, _) => event
           }
         }
-        assert(queryResult2 === List(event2))
+        queryResult2 shouldEqual List(event2)
       }
     }
 
@@ -343,7 +384,7 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result1.storedEventList.map(_.data) === List(event1))
+        result1.storedEventList.map(_.data) shouldEqual List(event1)
       }
     }
 
@@ -358,7 +399,7 @@ class AtomicEventStoreSpec
 
         receptionist ! Envelope("other scope", reply1.response(didPass = true))
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result1.storedEventList.map(_.data) === List(event1))
+        result1.storedEventList.map(_.data) shouldEqual List(event1)
       }
     }
 
@@ -373,7 +414,7 @@ class AtomicEventStoreSpec
 
         lastSender ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result1.storedEventList.map(_.data) === List(event1))
+        result1.storedEventList.map(_.data) shouldEqual List(event1)
       }
     }
 
@@ -388,11 +429,10 @@ class AtomicEventStoreSpec
 
         // Steal a direct reference to the log so we can manage its lifecycle
         val logRef = lastSender
-        watch(logRef)
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result1.storedEventList.map(_.data) === List(event1))
+        result1.storedEventList.map(_.data) shouldEqual List(event1)
 
         val event2 = TestEvent2(testScope1)
         receptionist ! StoreIfValid(event2)
@@ -400,7 +440,7 @@ class AtomicEventStoreSpec
 
         receptionist ! reply2.response(didPass = true)
         val result2 = expectMsgPF(hint = "Result") { case result: Result => result }
-        assert(result2.storedEventList.map(_.data) === List(event1, event2))
+        result2.storedEventList.map(_.data) shouldEqual List(event1, event2)
 
         receptionist ! eventsForScopeQuery(testScope1)
         val queryResult1 = expectMsgPF(hint = "list of one event") {
@@ -408,10 +448,9 @@ class AtomicEventStoreSpec
             case Timestamped(event, _) => event
           }
         }
-        assert(queryResult1 === List(event1, event2))
+        queryResult1 shouldEqual List(event1, event2)
 
-        receptionist ! Envelope(testScope1, PoisonPill)
-        expectMsgPF(hint = "Terminated message for the log actor") { case Terminated(`logRef`) => }
+        cleanup(logRef)
 
         receptionist ! eventsForScopeQuery(testScope1)
         val queryResult2 = expectMsgPF(hint = "list of one event") {
@@ -419,7 +458,7 @@ class AtomicEventStoreSpec
             case Timestamped(event, _) => event
           }
         }
-        assert(queryResult2 === List(event1, event2))
+        queryResult2 shouldEqual List(event1, event2)
       }
     }
   }

@@ -9,48 +9,49 @@ import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
 
 /**
-  * Implements a data-agnostic persistent event store, in the Event Sourcing
-  * methodology. The store is divided into scopes, and within each scope events
-  * can be admitted to a log, one at a time. Clients request events to be
-  * admitted to the log by sending [[StoreIfValid]] messages containing the
-  * prospective [[EventType]].
-  *
-  * The sender of the event will receive a [[ValidationRequest]] message, and
-  * is then responsible for validating the event, or delegating that
-  * responsibility. The validator determines whether a command should be
-  * accepted as an event, considering all of the previously accepted events as
-  * context for that decision, and replies to the log with a
-  * [[ValidationResponse]] message. The log will then persist the event to
-  * storage, if it was accepted, and then reply to the client with a [[Result]]
-  * message. The client is then responsible for carrying out the consequences
-  * of the event being accepted or rejected, e.g. updating state and notifying
-  * its downstream clients. During validation, the AtomicEventStore postpones
-  * consideration of any other events, maintaining atomicity.
-  *
-  * It's important for the client to *not* attempt to perform any
-  * "prevalidation" on an event in the context of other events, before sending
-  * the event to the AtomicEventStore. This would break atomicity. Always do
-  * all validation only in response to the [[ValidationRequest]] message.
-  *
-  * Subclass this abstract class, and then use
-  * [[AtomicEventStore#receptionistProps]] as the entry point for instantiating
-  * the system. The receptionist manages the lifecycle of the logs, and the
-  * logs manage their own persistence.
-  *
-  * @tparam EventType the supertype of domain events used by this store
-  * @tparam ValidationReason supertype for descriptor objects that indicate why
-  *                          an event validation failed (or succeeded)
-
-  * @param timeoutReason reason object for validations that timeout
-  */
-abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason](
+ * Implements a data-agnostic persistent event store, in the Event Sourcing
+ * methodology. The store is divided into scopes, and within each scope events
+ * can be admitted to a log, one at a time. Clients request events to be
+ * admitted to the log by sending [[StoreIfValid]] messages containing the
+ * prospective [[EventType]].
+ *
+ * The sender of the event will receive a [[ValidationRequest]] message, and
+ * is then responsible for validating the event, or delegating that
+ * responsibility. The validator determines whether a command should be
+ * accepted as an event, considering all of the previously accepted events as
+ * context for that decision, and replies to the log with a
+ * [[ValidationResponse]] message. The log will then persist the event to
+ * storage, if it was accepted, and then reply to the client with a [[Result]]
+ * message. The client is then responsible for carrying out the consequences
+ * of the event being accepted or rejected, e.g. updating state and notifying
+ * its downstream clients. During validation, the AtomicEventStore postpones
+ * consideration of any other events, maintaining atomicity.
+ *
+ * It's important for the client to *not* attempt to perform any
+ * "prevalidation" on an event in the context of other events, before sending
+ * the event to the AtomicEventStore. This would break atomicity. Always do
+ * all validation only in response to the [[ValidationRequest]] message.
+ *
+ * Subclass this abstract class, and then use
+ * [[AtomicEventStore#receptionistProps]] as the entry point for instantiating
+ * the system. The receptionist manages the lifecycle of the logs, and the
+ * logs manage their own persistence.
+ *
+ * @tparam EventType the supertype of domain events used by this store
+ * @tparam ValidationReason supertype for descriptor objects that indicate why
+ *                          an event validation failed (or succeeded)
+ *
+ * @param timeoutReason reason object for validations that timeout
+ */
+abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, ValidationReason](
   timeoutReason: ValidationReason
-) {
+) extends Serializable {
   /**
-    * The props for instantiating the AtomicEventStore network
-    * @param validationTimeout the duration to wait before validation fails, if
-    *                          no response is yet received.
-    */
+   * The props for instantiating the AtomicEventStore network
+   *
+   * @param validationTimeout the duration to wait before validation fails, if
+   *                          no response is yet received.
+   */
   def receptionistProps(validationTimeout: FiniteDuration) =
     Props(new Receptionist(EventLog.props, validationTimeout))
 
@@ -59,11 +60,11 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
   //
 
   /**
-    * Trait for messages that should be routed to a specific log. Using the
-    * [[Scoped]] type class for messages that carry events allow those to
-    * either be sent to the receptionist or replied to the log directly.
-    */
-  trait ScopedMessage {
+   * Trait for messages that should be routed to a specific log. Using the
+   * [[Scoped]] type class for messages that carry events allow those to
+   * either be sent to the receptionist or replied to the log directly.
+   */
+  trait ScopedMessage extends Serializable {
     def scopeId: String
   }
 
@@ -77,8 +78,8 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
         case msg: ScopedMessage =>
           msg match {
             case Envelope(_, ScopedMessage(scopeId, m)) => Some((scopeId, m))
-            case Envelope(scopeId, m) => Some((scopeId, m))
-            case _ => Some((msg.scopeId, msg))
+            case Envelope(scopeId, m)                   => Some((scopeId, m))
+            case _                                      => Some((msg.scopeId, msg))
           }
         case _ => None
       }
@@ -86,23 +87,25 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
   }
 
   /**
-    * Envelope for messages sent to the Receptionist that should be forwarded
-    * on to the appropriate log, particularly when the message doesn't contain
-    * the log's scope in any inherent way.
-    * @param scopeId scope of the log to forward to
-    * @param message message to forward
-    * @tparam MessageType contained message type
-    */
+   * Envelope for messages sent to the Receptionist that should be forwarded
+   * on to the appropriate log, particularly when the message doesn't contain
+   * the log's scope in any inherent way.
+   *
+   * @param scopeId scope of the log to forward to
+   * @param message message to forward
+   * @tparam MessageType contained message type
+   */
   case class Envelope[MessageType](scopeId: String, message: MessageType) extends ScopedMessage
 
   /** Asks a log for its list of events */
   case object QueryEvents
 
   /**
-    * Ask for the events from a specific log
-    * @param scopeId log scope
-    * @return a message the receptionist can forward to the log
-    */
+   * Ask for the events from a specific log
+   *
+   * @param scopeId log scope
+   * @return a message the receptionist can forward to the log
+   */
   def eventsForScopeQuery(scopeId: String) = Envelope(scopeId, QueryEvents)
 
   /**
@@ -110,6 +113,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
    * replied to the sender, so it can validate the event in the context of the
    * all the previously accepted events, while the event store queues any other
    * incoming events.
+   *
    * @param event event to consider
    */
   case class StoreIfValid(event: EventType) extends ScopedMessage {
@@ -120,6 +124,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
    * Sent to the original requester for to request validation. The atomicity of
    * the event log holds off any other prospective events while the validation
    * decision is being made.
+   *
    * @param prospectiveEvent the event to consider
    * @param pastEvents all prior events
    */
@@ -130,6 +135,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
 
   /**
    * The response to send back to determine whether to accept the event or not.
+   *
    * @param validationDidPass true, iff the event should be accepted
    * @param event the event considered
    * @param reason the reason for the decision. Usually included iff the event
@@ -141,13 +147,15 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
       Result(validationDidPass, event, events, reason)
   }
 
-  /** Response that indicates whether the incoming event was accepted.
-    * @param wasAccepted true iff validation succeeded before the timeout
-    * @param prospectiveEvent the event sent in the original request
-    * @param storedEventList all accepted events at the time of response (including
-    *                  the prospective one, iff accepted)
-    * @param reason the validation reason
-    */
+  /**
+   * Response that indicates whether the incoming event was accepted.
+   *
+   * @param wasAccepted true iff validation succeeded before the timeout
+   * @param prospectiveEvent the event sent in the original request
+   * @param storedEventList all accepted events at the time of response (including
+   *                  the prospective one, in the final position, iff accepted)
+   * @param reason the validation reason
+   */
   case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[Timestamped[EventType]], reason: Option[ValidationReason])
 
   /** Diagnostic query to inspect live log actors */
@@ -159,6 +167,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
 
   /**
    * Supervises the [[EventLog]] actors and routes incoming requests to them
+   *
    * @param logProps factory for making EventLog props for given scope IDs.
    *                 This is mostly for testing, and is wired up automatically
    *                 when using [[receptionistProps]]
@@ -196,35 +205,35 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
   }
 
   /**
-    * Actor responsible for processing and persisting events within a scope.
-    *
-    * When reading the code below, it's important to note that there are 3
-    * distinct senses of the term event:
-    *
-    * - External events -- the permanent events clients care about
-    * - Internal events -- represent all changes to the stored data, whether
-    *   for internal use (transient) or external visibility (permanent)
-    * - Persistent FSM Events -- wrappers for internal events that bundle the
-    *   stored data as well
-    *
-    * In addition, there are 2 distinct senses of the idea of state:
-    *
-    * - Persistent FSM state -- the two modes the actor can be in
-    * - Actor state -- the locally managed data
-    *
-    * @param scopeId separates this log from others, both by storage and
-    *                provided atomicity
-    */
+   * Actor responsible for processing and persisting events within a scope.
+   *
+   * When reading the code below, it's important to note that there are 3
+   * distinct senses of the term event:
+   *
+   * - External events -- the permanent events clients care about
+   * - Internal events -- represent all changes to the stored data, whether
+   *   for internal use (transient) or external visibility (permanent)
+   * - Persistent FSM Events -- wrappers for internal events that bundle the
+   *   stored data as well
+   *
+   * In addition, there are 2 distinct senses of the idea of state:
+   *
+   * - Persistent FSM state -- the two modes the actor can be in
+   * - Actor state -- the locally managed data
+   *
+   * @param scopeId separates this log from others, both by storage and
+   *                provided atomicity
+   */
   class EventLog(scopeId: String, validationTimeout: FiniteDuration) extends PersistentFSM[EventLogState, EventLogData, EventLogInternalEvent] with Stash {
 
     // Separate the logs in the database by scopes
     def persistenceId: String = s"domainEvents:$scopeId"
 
     /**
-      * StateFunction for managing queries. This is factored out so that it can
-      * be composed with the state-specific StateFunctions below, so that it is
-      * always available.
-      */
+     * StateFunction for managing queries. This is factored out so that it can
+     * be composed with the state-specific StateFunctions below, so that it is
+     * always available.
+     */
     val handleQuery: StateFunction = {
       case Event(QueryEvents, data) =>
         stay().replying(data.eventList)
@@ -234,8 +243,8 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
     def applyEvent(domainEvent: EventLogInternalEvent, currentData: EventLogData): EventLogData =
       domainEvent match {
         case ConsiderEventFromSender(event, replyTo) => currentData.consideringEventFromSender(event, replyTo)
-        case StoreEvent(storedEvent) => currentData.storingEvent(storedEvent)
-        case DoNotStoreEvent => currentData.consideringNothing
+        case StoreEvent(storedEvent)                 => currentData.storingEvent(storedEvent)
+        case DoNotStoreEvent                         => currentData.consideringNothing
       }
 
     startWith(EventLogAvailable, EventLogData(None, Nil))
@@ -302,7 +311,7 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
     def domainEventClassTag: ClassTag[EventLogInternalEvent] = implicitly[ClassTag[EventLogInternalEvent]]
   }
 
-  object EventLog {
+  object EventLog extends Serializable {
     /** Convenience method for the props to instantiate the EventLog actor */
     def props(scope: String, validationTimeout: FiniteDuration) = Props(new EventLog(scope, validationTimeout))
   }
@@ -319,12 +328,12 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
   }
 
   /**
-    * All state data stored by the log
-    *
-    * @param eventUnderConsiderationAndSender internal record of the event under
-    *                                consideration, to ensure atomicity.
-    * @param eventList list of events stored in the scope
-    */
+   * All state data stored by the log
+   *
+   * @param eventUnderConsiderationAndSender internal record of the event under
+   *                                consideration, to ensure atomicity.
+   * @param eventList list of events stored in the scope
+   */
   case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[Timestamped[EventType]]) {
     def consideringEventFromSender(event: EventType, replyTo: ActorRef): EventLogData =
       copy(eventUnderConsiderationAndSender = Some(event, replyTo))
@@ -337,13 +346,13 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
   }
 
   /**
-    * All possible modifications to the EventLog stored data and state
-    *
-    * `replyTo` is only stored for timeouts. We reply to `sender` instead in
-    * normal operation.
-    */
+   * All possible modifications to the EventLog stored data and state
+   *
+   * `replyTo` is only stored for timeouts. We reply to `sender` instead in
+   * normal operation.
+   */
   sealed trait EventLogInternalEvent
-  case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent
-  case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent
-  case object DoNotStoreEvent extends EventLogInternalEvent
+  case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent with Serializable
+  case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent with Serializable
+  case object DoNotStoreEvent extends EventLogInternalEvent with Serializable
 }

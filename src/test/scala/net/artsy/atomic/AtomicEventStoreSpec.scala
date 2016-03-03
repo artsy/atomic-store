@@ -13,7 +13,7 @@ class EchoActor extends Actor {
 }
 
 class AtomicEventStoreSpec
-  extends ImplicitSender with WordSpecLike with Matchers with BeforeAndAfterAll with TestKitBase {
+  extends ImplicitSender with WordSpecLike with Matchers with BeforeAndAfterAll with TestKitBase with Serializable {
 
   // Akka boilerplate
 
@@ -46,13 +46,13 @@ class AtomicEventStoreSpec
     def scopeIdentifier(domainEvent: TestEvent): String = domainEvent.scopeId
   }
 
-  sealed trait ValidationReason
+  sealed trait ValidationReason extends Serializable
   case object Timeout extends ValidationReason
   case object ArbitraryRejectionReason extends ValidationReason
 
 
   val validationTimeout = 3.second
-  object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout)
+  object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout) with Serializable
   import TestEventStore._
 
   // Test helper code
@@ -61,7 +61,7 @@ class AtomicEventStoreSpec
 
   // Used to isolate scopes from one test to another so we don't have to clean
   // up
-  object UniqueId {
+  object UniqueId extends Serializable {
     private var count = 0
     def next: Int = synchronized {
       val last = count
@@ -424,10 +424,10 @@ class AtomicEventStoreSpec
         queryResult1 shouldEqual List(event1, event2)
 
         cleanup(logRef)
-//        receptionist ! Envelope(testScope1, PoisonPill)
-//        expectMsgPF(hint = "Terminated message for the log actor") { case Terminated(`logRef`) => }
 
+        println("Log killed, proceeding")
         receptionist ! eventsForScopeQuery(testScope1)
+        println("Query for events")
         val queryResult2 = expectMsgPF(hint = "list of one event") {
           case storedEvents: List[_] => storedEvents.collect {
             case Timestamped(event, _) => event

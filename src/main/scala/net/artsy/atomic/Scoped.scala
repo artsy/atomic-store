@@ -14,6 +14,6 @@ package net.artsy.atomic
  *
  * @tparam T the underlying type
  */
-trait Scoped[T] {
+trait Scoped[T] extends Serializable {
   def scopeIdentifier(domainEvent: T): String
 }

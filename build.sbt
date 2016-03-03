@@ -13,7 +13,7 @@ libraryDependencies ++= Seq(
   "com.github.nscala-time"    %% "nscala-time"                % "2.2.0",
   "org.iq80.leveldb"          % "leveldb"                     % "0.7", // For LevelDB journal
   "org.fusesource.leveldbjni" % "leveldbjni-all"              % "1.8", // For LevelDB journal
-  "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "1.2.7"
+  "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "1.2.1"
 )
 
 fork := true

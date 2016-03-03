@@ -3,7 +3,6 @@ package net.artsy.atomic
 import akka.actor._
 import akka.persistence.fsm.PersistentFSM
 import akka.persistence.fsm.PersistentFSM.FSMState
-import akka.persistence.serialization.Message
 import org.joda.time.DateTime
 
 import scala.concurrent.duration.FiniteDuration
@@ -69,7 +68,7 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
     def scopeId: String
   }
 
-  object ScopedMessage extends Serializable{
+  object ScopedMessage {
     // This bit of magic lets us pull the scope ID off of messages that are
     // inherently scoped, like events, while allowing unscoped messages to be
     // routed using [[Envelope]]. If an Envelope wraps an inherently scoped
@@ -99,7 +98,7 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
   case class Envelope[MessageType](scopeId: String, message: MessageType) extends ScopedMessage
 
   /** Asks a log for its list of events */
-  case object QueryEvents extends Serializable
+  case object QueryEvents
 
   /**
     * Ask for the events from a specific log
@@ -129,7 +128,7 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
     * @param prospectiveEvent the event to consider
    * @param pastEvents all prior events
    */
-  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[Timestamped[EventType]]) extends Serializable {
+  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[Timestamped[EventType]]) {
     def response(didPass: Boolean, reason: Option[ValidationReason] = None) =
       ValidationResponse(didPass, prospectiveEvent, reason)
   }
@@ -156,10 +155,10 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
     *                  the prospective one, in the final position, iff accepted)
     * @param reason the validation reason
     */
-  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[Timestamped[EventType]], reason: Option[ValidationReason]) extends Serializable
+  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[Timestamped[EventType]], reason: Option[ValidationReason])
 
   /** Diagnostic query to inspect live log actors */
-  case object GetLiveLogScopes extends Serializable
+  case object GetLiveLogScopes
 
   ///////////
   // Actors
@@ -172,27 +171,23 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
    *                 This is mostly for testing, and is wired up automatically
    *                 when using [[receptionistProps]]
    */
-  class Receptionist(logProps: (String, FiniteDuration) => Props, validationTimeout: FiniteDuration) extends Actor with Serializable {
+  class Receptionist(logProps: (String, FiniteDuration) => Props, validationTimeout: FiniteDuration) extends Actor {
     var logs = Map.empty[String, ActorRef]
 
     def liveLogForScope(scope: String): ActorRef = {
       val (newLogs, targetLog) = logs.get(scope) match {
         case Some(foundLog) => (logs, foundLog)
         case None =>
-          println(s"Instantiating log")
           // Recreate the log, which will recall all preexisting events
           val materializedLog = context.actorOf(logProps(scope, validationTimeout), scope)
 
           // Set up a death watch, so we can remove logs that are terminated
           context.watch(materializedLog)
 
-          val temp = (logs + (scope -> materializedLog), materializedLog)
-          println(s"Log instantiated.")
-          temp
+          (logs + (scope -> materializedLog), materializedLog)
       }
 
       logs = newLogs
-      println(s"Logs: $logs")
       targetLog
     }
 
@@ -202,7 +197,6 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
 
       case Terminated(deadActorRef) =>
         logs = logs.filterNot { case (_, ref) => ref == deadActorRef }
-        println(s"Log terminated. Logs: $logs")
 
       case GetLiveLogScopes =>
         sender() ! logs.keys.toSet
@@ -229,7 +223,7 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
     * @param scopeId separates this log from others, both by storage and
     *                provided atomicity
     */
-  class EventLog(scopeId: String, validationTimeout: FiniteDuration) extends PersistentFSM[EventLogState, EventLogData, EventLogInternalEvent] with Stash with Serializable{
+  class EventLog(scopeId: String, validationTimeout: FiniteDuration) extends PersistentFSM[EventLogState, EventLogData, EventLogInternalEvent] with Stash {
 
     // Separate the logs in the database by scopes
     def persistenceId: String = s"domainEvents:$scopeId"
@@ -241,7 +235,6 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
       */
     val handleQuery: StateFunction = {
       case Event(QueryEvents, data) =>
-        println(s"QueryEvents (data: $data)")
         stay().replying(data.eventList)
     }
 
@@ -313,13 +306,6 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
       case EventLogBusyValidating -> EventLogAvailable => unstashAll()
     }
 
-    override def onRecoveryCompleted() = println("Recovery completed")
-
-    override protected def onPersistFailure(cause: Throwable, event: Any, seqNr: Long): Unit = {
-      log.error(cause, "Failed to persist event type [{}] with sequence number [{}] for persistenceId [{}].",
-        event.getClass.getName, seqNr, persistenceId)
-    }
-
     // Don't really understand why this is needed to fulfill the trait, but whatevs
     def domainEventClassTag: ClassTag[EventLogInternalEvent] = implicitly[ClassTag[EventLogInternalEvent]]
   }
@@ -332,7 +318,7 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
   // Data types for EventLog
 
   // States
-  sealed trait EventLogState extends FSMState with Serializable
+  sealed trait EventLogState extends FSMState
   case object EventLogAvailable extends EventLogState {
     override def identifier: String = "available"
   }
@@ -347,7 +333,7 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
     *                                consideration, to ensure atomicity.
     * @param eventList list of events stored in the scope
     */
-  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[Timestamped[EventType]]) extends Serializable {
+  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[Timestamped[EventType]]) {
     def consideringEventFromSender(event: EventType, replyTo: ActorRef): EventLogData =
       copy(eventUnderConsiderationAndSender = Some(event, replyTo))
 
@@ -364,8 +350,8 @@ abstract class AtomicEventStore[EventType <: Serializable : Scoped : ClassTag, V
     * `replyTo` is only stored for timeouts. We reply to `sender` instead in
     * normal operation.
     */
-  sealed trait EventLogInternalEvent extends Message
-  case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent
-  case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent
-  case object DoNotStoreEvent extends EventLogInternalEvent
+  sealed trait EventLogInternalEvent
+  case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent with Serializable
+  case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent with Serializable
+  case object DoNotStoreEvent extends EventLogInternalEvent with Serializable
 }

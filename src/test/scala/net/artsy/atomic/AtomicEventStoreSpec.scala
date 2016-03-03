@@ -1,7 +1,6 @@
 package net.artsy.atomic
 
 import akka.actor._
-import akka.persistence.inmemory.extension.DaoRegistry
 import akka.testkit._
 import org.joda.time.DateTime
 import org.scalatest._
@@ -15,8 +14,8 @@ class EchoActor extends Actor {
 }
 
 
-// Declare test types for events and validations
-
+// Declare test types for events and validations. These have to be declared
+// outside the Spec's scope for serialization purposes.
 sealed trait TestEvent extends Serializable { def scopeId: String }
 case class TestEvent1(scopeId: String) extends TestEvent
 case class TestEvent2(scopeId: String) extends TestEvent
@@ -30,12 +29,20 @@ sealed trait ValidationReason extends Serializable
 case object Timeout extends ValidationReason
 case object ArbitraryRejectionReason extends ValidationReason
 
-object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout) with Serializable
+object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout)
 
 class AtomicEventStoreSpec
-  extends ImplicitSender with WordSpecLike with Matchers with BeforeAndAfterAll with TestKitBase with Serializable {
+  extends ImplicitSender
+    with WordSpecLike
+    with Matchers
+    with BeforeAndAfterAll
+    with TestKitBase {
 
+  import TestEventStore._
+
+  //
   // Akka boilerplate
+  //
 
   implicit lazy val system = ActorSystem()
 
@@ -43,35 +50,32 @@ class AtomicEventStoreSpec
     TestKit.shutdownActorSystem(system)
   }
 
-  def probe: TestProbe = TestProbe()
-
-  /**
-    * Sends the PoisonPill command to an actor and waits for it to die
-    */
-  def cleanup(actors: ActorRef*): Unit = {
-    val tp = probe
-    actors.foreach { (actor: ActorRef) ⇒
-      tp watch actor
-      actor ! PoisonPill
-      tp.expectTerminated(actor)
-    }
-  }
-
-  val validationTimeout = 3.second
-  import TestEventStore._
-
+  //
   // Test helper code
+  //
 
-  val defaultTimeout = 3.second
+  val validationTimeout = 1.second
+  val defaultTimeout = 1.second
 
   // Used to isolate scopes from one test to another so we don't have to clean
   // up
-  object UniqueId extends Serializable {
+  object UniqueId  {
     private var count = 0
     def next: Int = synchronized {
       val last = count
       count += 1
       last
+    }
+  }
+
+  /** Kills an actor and waits for it to die */
+  def cleanup(actors: ActorRef*): Unit = {
+    val tp = TestProbe()
+    actors.foreach { (actor: ActorRef) ⇒
+      tp.watch(actor)
+      actor ! PoisonPill
+      tp.expectTerminated(actor)
+      tp.unwatch(actor)
     }
   }
 
@@ -93,6 +97,25 @@ class AtomicEventStoreSpec
     val logMaker = () => (system.actorOf(EventLog.props(testLogScope, validationTimeout)), testLogScope)
 
     testCode(logMaker)
+  }
+
+  "TestEvent events" must {
+    "be serializable" in {
+      val serialization = akka.serialization.SerializationExtension(system)
+      def serialize[A <: AnyRef](obj: A) = {
+        val serializer = serialization.findSerializerFor(obj)
+        serializer.toBinary(obj)
+      }
+
+      val event1 = TestEvent1("blah")
+      serialize(event1)
+      serialize(Timestamped(event1, DateTime.now()))
+      serialize(TestEventStore.ConsiderEventFromSender(event1, testActor))
+      serialize(TestEventStore.StoreEvent(Timestamped(event1, DateTime.now())))
+      serialize(TestEventStore.DoNotStoreEvent)
+      serialize(TestEventStore.EventLogAvailable)
+      serialize(TestEventStore.EventLogBusyValidating)
+    }
   }
 
   "Receptionist" must {
@@ -428,22 +451,9 @@ class AtomicEventStoreSpec
         }
         queryResult1 shouldEqual List(event1, event2)
 
-        import java.io._
-        val out = new ObjectOutputStream(new FileOutputStream("/Users/alan/projects/test.obj"))
-        out.writeObject(event1)
-        out.writeObject(Timestamped(event1, DateTime.now()))
-        out.writeObject(StoreEvent(Timestamped(event1, DateTime.now())))
-        out.writeObject(ConsiderEventFromSender(event1, testActor))
-        out.writeObject(DoNotStoreEvent)
-        out.writeObject(EventLogAvailable)
-        out.writeObject(EventLogBusyValidating)
-        out.close()
-
         cleanup(logRef)
 
-        println("Log killed, proceeding")
         receptionist ! eventsForScopeQuery(testScope1)
-        println("Query for events")
         val queryResult2 = expectMsgPF(hint = "list of one event") {
           case storedEvents: List[_] => storedEvents.collect {
             case Timestamped(event, _) => event

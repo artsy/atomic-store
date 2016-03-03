@@ -12,7 +12,7 @@ libraryDependencies ++= {
     "com.typesafe.akka" %% "akka-persistence" % akkaVersion,
     "com.typesafe.akka" %% "akka-persistence-query-experimental" % akkaVersion,
     "com.github.nscala-time" %% "nscala-time" % "2.2.0",
-    "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.2.7",
+    "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.2.8",
     "com.typesafe.akka" %% "akka-testkit" % akkaVersion % Test,
     "org.scalatest" %% "scalatest" % "2.2.1" % Test
   )

@@ -217,6 +217,9 @@ abstract class AtomicEventStore[EventType : Scoped : ClassTag, ValidationReason]
     */
   class EventLog(scopeId: String, validationTimeout: FiniteDuration) extends PersistentFSM[EventLogState, EventLogData, EventLogInternalEvent] with Stash {
 
+    override protected def onPersistFailure(cause: Throwable, event: Any, seqNr: Long): Unit =
+      println(s"=====>> (PersistFailure) cause: $cause, event: $event, seqNr: $seqNr")
+
     // Separate the logs in the database by scopes
     def persistenceId: String = s"domainEvents:$scopeId"
 

@@ -8,4 +8,6 @@ import org.joda.time.DateTime
  * @param createdAt timestamp for creation time
  * @tparam A domain data's type
  */
-case class Timestamped[A <: Serializable](data: A, createdAt: DateTime) extends Serializable
+case class Timestamped[A <: Serializable](data: A, createdAt: DateTime) extends Serializable {
+  def map[B <: Serializable](f: A => B): Timestamped[B] = Timestamped(f(data), createdAt)
+}

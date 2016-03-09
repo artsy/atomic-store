@@ -5,7 +5,7 @@
 * __State:__ development
 * __Point People:__ [@acjay](https://github.com/acjay)
 
-Atomic Store is a system for managing persistent streams of atomic events. It is intended for systems in which only one event can be admitted to the canonical stream at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator.
+Atomic Store is a system for managing persistent streams of atomic events. It is intended for systems in which only one event can be admitted to the canonical stream at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible. 
 
 ## Installation
 
@@ -17,11 +17,14 @@ At the moment, the only thing you can do is execute the tests, by running `test`
 
 ## Integrating into a project
 
-Eventually, this will be published to a public Maven repository for proper versioning, but at the moment, it can be included within another project directly via GitHub:
+Include the following line in your `build.sbt`:
 
 ```
-RootProject(uri("git://github.com/artsy/atomic-store.git"))
+libraryDependencies ++= Seq(
+  "net.artsy" %% "atomic-store" % "0.0.2")
 ```
+
+In a project, it's likely you will want some sort of server-push mechanism to notify clients of new events. Rather than containing this logic. This code can likely be located within the same logic that does the validation.
 
 ## Technology
 
@@ -32,3 +35,10 @@ Atomic Store is built using Scala, the Akka framework, and associated libraries.
   - [Actor basics](http://doc.akka.io/docs/akka/snapshot/scala/actors.html)
   - [Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html)
   
+## Changelog
+
+*0.0.2*
+- Add `map` to `Timestamped`
+
+*0.0.1*
+- Initial release

@@ -79,7 +79,7 @@ class AtomicEventStoreSpec
   }
 
   /** Loan fixture for setting up receptionist with dummy logs */
-  def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any) {
+  def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any) = {
     // For test purposes, inject a factory that makes spies instead of logs for
     // the receptionists children
     val dummyLogFactory = (_: String, _: FiniteDuration) => Props(new EchoActor)
@@ -90,7 +90,7 @@ class AtomicEventStoreSpec
   }
 
   /** Loan fixture for setting up a simple log */
-  def withLog(testCode: (() => (ActorRef, String)) => Any) {
+  def withLog(testCode: (() => (ActorRef, String)) => Any) = {
     val testLogScope = s"test-${UniqueId.next}"
 
     val logMaker = () => (system.actorOf(EventLog.props(testLogScope, validationTimeout)), testLogScope)

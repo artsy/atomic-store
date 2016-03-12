@@ -13,7 +13,7 @@ import scala.reflect.ClassTag
  * methodology. The store is divided into scopes, and within each scope events
  * can be admitted to a log, one at a time. Clients request events to be
  * admitted to the log by sending [[StoreIfValid]] messages containing the
- * prospective [[EventType]].
+ * prospective EventType.
  *
  * The sender of the event will receive a [[ValidationRequest]] message, and
  * is then responsible for validating the event, or delegating that

@@ -9,5 +9,10 @@ import org.joda.time.DateTime
  * @tparam A domain data's type
  */
 case class Timestamped[A <: Serializable](data: A, createdAt: DateTime) extends Serializable {
+  /**
+   * Converts the contents of a timestamped event to another form, preserving
+   * the timestamp. This is useful for providing alternate views of the same
+   * sequence of events.
+   */
   def map[B <: Serializable](f: A => B): Timestamped[B] = Timestamped(f(data), createdAt)
 }

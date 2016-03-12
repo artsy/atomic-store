@@ -5,6 +5,8 @@
 * __State:__ development
 * __Point People:__ [@acjay](https://github.com/acjay)
 
+**WARNING: This is pre-production software. Use at your own risk. While it will be used in a commercial system soon, it is not currently thoroughly tested, and major features are pending.**
+
 Atomic Store is a system for managing persistent streams of atomic events. It is intended for systems in which only one event can be admitted to the canonical stream at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible. 
 
 ## Installation
@@ -34,6 +36,11 @@ Atomic Store is built using Scala, the Akka framework, and associated libraries.
 - [Akka](http://doc.akka.io/docs/akka/snapshot/scala.html)
   - [Actor basics](http://doc.akka.io/docs/akka/snapshot/scala/actors.html)
   - [Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html)
+  
+## Todos ##
+
+- Akka Clustering support for failover.
+- Support for configurable serialization.
   
 ## Changelog
 

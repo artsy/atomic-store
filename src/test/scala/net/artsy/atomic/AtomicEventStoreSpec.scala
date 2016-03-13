@@ -2,7 +2,6 @@ package net.artsy.atomic
 
 import akka.actor._
 import akka.testkit._
-import org.joda.time.DateTime
 import org.scalatest._
 import scala.concurrent.duration.{ FiniteDuration, DurationInt }
 
@@ -108,9 +107,8 @@ class AtomicEventStoreSpec
 
       val event1 = TestEvent1("blah")
       serialize(event1)
-      serialize(Timestamped(event1, DateTime.now()))
       serialize(TestEventStore.ConsiderEventFromSender(event1, testActor))
-      serialize(TestEventStore.StoreEvent(Timestamped(event1, DateTime.now())))
+      serialize(TestEventStore.StoreEvent(event1))
       serialize(TestEventStore.DoNotStoreEvent)
       serialize(TestEventStore.EventLogAvailable)
       serialize(TestEventStore.EventLogBusyValidating)
@@ -200,7 +198,7 @@ class AtomicEventStoreSpec
         log ! reply.response(toAccept)
         val result = expectMsgPF(hint = "Result") { case result: Result => result }
         result.wasAccepted shouldEqual toAccept
-        result.storedEventList.lastOption.map(_.data).contains(event) shouldBe true
+        result.storedEventList.lastOption.contains(event) shouldBe true
       }
     }
 
@@ -219,7 +217,7 @@ class AtomicEventStoreSpec
         expectMsgPF(hint = "Result") { case result: Result => result }
 
         log ! QueryEvents
-        expectMsgPF(hint = "empty list of events") { case List(Timestamped(eventInStore, _)) if eventInStore == event => }
+        expectMsgPF(hint = "empty list of events") { case List(`event`) => }
       }
     }
 
@@ -239,7 +237,7 @@ class AtomicEventStoreSpec
         val result = expectMsgPF(hint = "Result") { case result: Result => result }
         result.wasAccepted shouldEqual toAccept
         result.reason.contains(reason) shouldBe true
-        result.storedEventList.exists(_.data == event) shouldBe false
+        result.storedEventList.contains(event) shouldBe false
       }
     }
 
@@ -323,9 +321,7 @@ class AtomicEventStoreSpec
 
         log ! QueryEvents
         val events = expectMsgPF(hint = "empty list of events") {
-          case storedEvents: List[_] => storedEvents.collect {
-            case Timestamped(event, _) => event
-          }
+          case storedEvents: List[_] => storedEvents
         }
         events should be(List(event1, event2, event3))
       }
@@ -349,25 +345,21 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        result1.storedEventList.map(_.data) shouldEqual List(event1)
+        result1.storedEventList shouldEqual List(event1)
 
         receptionist ! reply2.response(didPass = true)
         val result2 = expectMsgPF(hint = "Result") { case result: Result => result }
-        result2.storedEventList.map(_.data) shouldEqual List(event2)
+        result2.storedEventList shouldEqual List(event2)
 
         receptionist ! eventsForScopeQuery(testScope1)
         val queryResult1 = expectMsgPF(hint = "list of one event") {
-          case storedEvents: List[_] => storedEvents.collect {
-            case Timestamped(event, _) => event
-          }
+          case storedEvents: List[_] => storedEvents
         }
         queryResult1 shouldEqual List(event1)
 
         receptionist ! eventsForScopeQuery(testScope2)
         val queryResult2 = expectMsgPF(hint = "list of one event") {
-          case storedEvents: List[_] => storedEvents.collect {
-            case Timestamped(event, _) => event
-          }
+          case storedEvents: List[_] => storedEvents
         }
         queryResult2 shouldEqual List(event2)
       }
@@ -384,7 +376,7 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        result1.storedEventList.map(_.data) shouldEqual List(event1)
+        result1.storedEventList shouldEqual List(event1)
       }
     }
 
@@ -399,7 +391,7 @@ class AtomicEventStoreSpec
 
         receptionist ! Envelope("other scope", reply1.response(didPass = true))
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        result1.storedEventList.map(_.data) shouldEqual List(event1)
+        result1.storedEventList shouldEqual List(event1)
       }
     }
 
@@ -414,7 +406,7 @@ class AtomicEventStoreSpec
 
         lastSender ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        result1.storedEventList.map(_.data) shouldEqual List(event1)
+        result1.storedEventList shouldEqual List(event1)
       }
     }
 
@@ -432,7 +424,7 @@ class AtomicEventStoreSpec
 
         receptionist ! reply1.response(didPass = true)
         val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
-        result1.storedEventList.map(_.data) shouldEqual List(event1)
+        result1.storedEventList shouldEqual List(event1)
 
         val event2 = TestEvent2(testScope1)
         receptionist ! StoreIfValid(event2)
@@ -440,13 +432,11 @@ class AtomicEventStoreSpec
 
         receptionist ! reply2.response(didPass = true)
         val result2 = expectMsgPF(hint = "Result") { case result: Result => result }
-        result2.storedEventList.map(_.data) shouldEqual List(event1, event2)
+        result2.storedEventList shouldEqual List(event1, event2)
 
         receptionist ! eventsForScopeQuery(testScope1)
         val queryResult1 = expectMsgPF(hint = "list of one event") {
-          case storedEvents: List[_] => storedEvents.collect {
-            case Timestamped(event, _) => event
-          }
+          case storedEvents: List[_] => storedEvents
         }
         queryResult1 shouldEqual List(event1, event2)
 
@@ -454,9 +444,7 @@ class AtomicEventStoreSpec
 
         receptionist ! eventsForScopeQuery(testScope1)
         val queryResult2 = expectMsgPF(hint = "list of one event") {
-          case storedEvents: List[_] => storedEvents.collect {
-            case Timestamped(event, _) => event
-          }
+          case storedEvents: List[_] => storedEvents
         }
         queryResult2 shouldEqual List(event1, event2)
       }

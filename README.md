@@ -45,7 +45,7 @@ Atomic Store is built using Scala, the Akka framework, and associated libraries.
 ## Changelog
 
 *0.0.2*
-- Add `map` to `Timestamped`
+- Remove `Timestamped`. It's not crucial to the logic of this library, so let the client own all of the metadata it wants to associate with its events.
 
 *0.0.1*
 - Initial release

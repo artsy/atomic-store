@@ -3,7 +3,6 @@ package net.artsy.atomic
 import akka.actor._
 import akka.persistence.fsm.PersistentFSM
 import akka.persistence.fsm.PersistentFSM.FSMState
-import org.joda.time.DateTime
 
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
@@ -128,7 +127,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * @param prospectiveEvent the event to consider
    * @param pastEvents all prior events
    */
-  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[Timestamped[EventType]]) {
+  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[EventType]) {
     def response(didPass: Boolean, reason: Option[ValidationReason] = None) =
       ValidationResponse(didPass, prospectiveEvent, reason)
   }
@@ -143,7 +142,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    */
   case class ValidationResponse(validationDidPass: Boolean, event: EventType, reason: Option[ValidationReason]) extends ScopedMessage {
     val scopeId = implicitly[Scoped[EventType]].scopeIdentifier(event)
-    def toResult(events: Seq[Timestamped[EventType]]): Result =
+    def toResult(events: Seq[EventType]): Result =
       Result(validationDidPass, event, events, reason)
   }
 
@@ -156,7 +155,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                  the prospective one, in the final position, iff accepted)
    * @param reason the validation reason
    */
-  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[Timestamped[EventType]], reason: Option[ValidationReason])
+  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[EventType], reason: Option[ValidationReason])
 
   /** Diagnostic query to inspect live log actors */
   case object GetLiveLogScopes
@@ -267,16 +266,14 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
         val nextState = goto(EventLogAvailable)
         val nextStateWithApply =
           if (wasAccepted) {
-            nextState.applying(StoreEvent(Timestamped(event, DateTime.now())))
+            nextState.applying(StoreEvent(event))
           } else {
             nextState.applying(DoNotStoreEvent)
           }
         nextStateWithApply.andThen { data =>
           // We have to wait until after the events have persisted to send our
-          // reply, instead of using `.replying` to send it synchronously, so
-          // that the sender will get the new event with its timestamp. True
-          // CQRS wouldn't do this, and instead make the sender listen for a
-          // change event. Perhaps we should send a ResultPreview message?
+          // reply, instead of using `.replying` to send it before the
+          // transition, just to make sure.
           replyTo ! v.toResult(data.eventList)
         }
 
@@ -334,14 +331,14 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                                consideration, to ensure atomicity.
    * @param eventList list of events stored in the scope
    */
-  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[Timestamped[EventType]]) {
+  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[EventType]) {
     def consideringEventFromSender(event: EventType, replyTo: ActorRef): EventLogData =
       copy(eventUnderConsiderationAndSender = Some(event, replyTo))
 
     def consideringNothing: EventLogData =
       copy(eventUnderConsiderationAndSender = None)
 
-    def storingEvent(eventToStore: Timestamped[EventType]): EventLogData =
+    def storingEvent(eventToStore: EventType): EventLogData =
       consideringNothing.copy(eventList = eventList :+ eventToStore)
   }
 
@@ -353,6 +350,6 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    */
   sealed trait EventLogInternalEvent
   case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent with Serializable
-  case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent with Serializable
+  case class StoreEvent(storedEvent: EventType) extends EventLogInternalEvent with Serializable
   case object DoNotStoreEvent extends EventLogInternalEvent with Serializable
 }

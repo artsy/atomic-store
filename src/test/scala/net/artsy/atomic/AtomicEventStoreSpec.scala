@@ -81,9 +81,9 @@ class AtomicEventStoreSpec
   def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any) = {
     // For test purposes, inject a factory that makes spies instead of logs for
     // the receptionists children
-    val dummyLogFactory = (_: String, _: FiniteDuration) => Props(new EchoActor)
+    val dummyLogFactory = (_: String) => Props(new EchoActor)
 
-    val receptionist = system.actorOf(Props[Receptionist](new Receptionist(dummyLogFactory, validationTimeout)))
+    val receptionist = system.actorOf(Props[Receptionist](new Receptionist(dummyLogFactory)))
 
     testCode(receptionist)
   }
@@ -92,7 +92,7 @@ class AtomicEventStoreSpec
   def withLog(testCode: (() => (ActorRef, String)) => Any) = {
     val testLogScope = s"test-${UniqueId.next}"
 
-    val logMaker = () => (system.actorOf(EventLog.props(testLogScope, validationTimeout)), testLogScope)
+    val logMaker = () => (system.actorOf(EventLog.props(testLogScope, validationTimeout, "", "")), testLogScope)
 
     testCode(logMaker)
   }

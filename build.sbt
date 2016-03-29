@@ -7,7 +7,7 @@ import scalariform.formatter.preferences._
 
 name := """atomic-store"""
 
-version := "0.0.2-SNAPSHOT"
+version := "0.0.2"
 
 organization := "net.artsy"
 
@@ -15,7 +15,7 @@ homepage := Some(url("https://github.com/artsy/atomic-store"))
 
 licenses +=("MIT", url("https://opensource.org/licenses/MIT"))
 
-scalaVersion := "2.11.7"
+scalaVersion := "2.11.8"
 
 resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven"
 

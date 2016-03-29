@@ -3,7 +3,6 @@ package net.artsy.atomic
 import akka.actor._
 import akka.persistence.fsm.PersistentFSM
 import akka.persistence.fsm.PersistentFSM.FSMState
-import org.joda.time.DateTime
 
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
@@ -13,7 +12,7 @@ import scala.reflect.ClassTag
  * methodology. The store is divided into scopes, and within each scope events
  * can be admitted to a log, one at a time. Clients request events to be
  * admitted to the log by sending [[StoreIfValid]] messages containing the
- * prospective [[EventType]].
+ * prospective EventType.
  *
  * The sender of the event will receive a [[ValidationRequest]] message, and
  * is then responsible for validating the event, or delegating that
@@ -39,9 +38,8 @@ import scala.reflect.ClassTag
  *
  * @tparam EventType the supertype of domain events used by this store
  * @tparam ValidationReason supertype for descriptor objects that indicate why
- *                          an event validation failed (or succeeded)
- *
- * @param timeoutReason reason object for validations that timeout
+ *                          an event validation failed (or succeeded).
+ * @param timeoutReason reason object for validations that timeout.
  */
 abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, ValidationReason](
   timeoutReason: ValidationReason
@@ -51,9 +49,16 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *
    * @param validationTimeout the duration to wait before validation fails, if
    *                          no response is yet received.
+   * @param journalPluginId ID of the plugin to use for the Akka Persistence
+   *                      journal back-end for logs.
+   * @param snapshotPluginId ID of the plugin to use for the Akka Persistence
+   *                       snapshot back-end for logs.
    */
-  def receptionistProps(validationTimeout: FiniteDuration) =
-    Props(new Receptionist(EventLog.props, validationTimeout))
+  def receptionistProps(
+    validationTimeout: FiniteDuration,
+    journalPluginId:   String         = "",
+    snapshotPluginId:  String         = ""
+  ) = Props(new Receptionist(EventLog.props(_, validationTimeout, journalPluginId, snapshotPluginId)))
 
   /////////////
   // Messages
@@ -128,7 +133,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * @param prospectiveEvent the event to consider
    * @param pastEvents all prior events
    */
-  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[Timestamped[EventType]]) {
+  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[EventType]) {
     def response(didPass: Boolean, reason: Option[ValidationReason] = None) =
       ValidationResponse(didPass, prospectiveEvent, reason)
   }
@@ -143,7 +148,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    */
   case class ValidationResponse(validationDidPass: Boolean, event: EventType, reason: Option[ValidationReason]) extends ScopedMessage {
     val scopeId = implicitly[Scoped[EventType]].scopeIdentifier(event)
-    def toResult(events: Seq[Timestamped[EventType]]): Result =
+    def toResult(events: Seq[EventType]): Result =
       Result(validationDidPass, event, events, reason)
   }
 
@@ -156,7 +161,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                  the prospective one, in the final position, iff accepted)
    * @param reason the validation reason
    */
-  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[Timestamped[EventType]], reason: Option[ValidationReason])
+  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[EventType], reason: Option[ValidationReason])
 
   /** Diagnostic query to inspect live log actors */
   case object GetLiveLogScopes
@@ -172,7 +177,9 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                 This is mostly for testing, and is wired up automatically
    *                 when using [[receptionistProps]]
    */
-  class Receptionist(logProps: (String, FiniteDuration) => Props, validationTimeout: FiniteDuration) extends Actor {
+  class Receptionist(
+    logProps: String => Props
+  ) extends Actor {
     var logs = Map.empty[String, ActorRef]
 
     def liveLogForScope(scope: String): ActorRef = {
@@ -180,7 +187,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
         case Some(foundLog) => (logs, foundLog)
         case None =>
           // Recreate the log, which will recall all preexisting events
-          val materializedLog = context.actorOf(logProps(scope, validationTimeout), scope)
+          val materializedLog = context.actorOf(logProps(scope), scope)
 
           // Set up a death watch, so we can remove logs that are terminated
           context.watch(materializedLog)
@@ -223,8 +230,17 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *
    * @param scopeId separates this log from others, both by storage and
    *                provided atomicity
+   * @param journalPluginId ID of the plugin to use for the Akka Persistence
+   *                      journal back-end for logs.
+   * @param snapshotPluginId ID of the plugin to use for the Akka Persistence
+   *                       snapshot back-end for logs.
    */
-  class EventLog(scopeId: String, validationTimeout: FiniteDuration) extends PersistentFSM[EventLogState, EventLogData, EventLogInternalEvent] with Stash {
+  class EventLog(
+    scopeId:                       String,
+    validationTimeout:             FiniteDuration,
+    override val journalPluginId:  String,
+    override val snapshotPluginId: String
+  ) extends PersistentFSM[EventLogState, EventLogData, EventLogInternalEvent] with Stash {
 
     // Separate the logs in the database by scopes
     def persistenceId: String = s"domainEvents:$scopeId"
@@ -267,16 +283,14 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
         val nextState = goto(EventLogAvailable)
         val nextStateWithApply =
           if (wasAccepted) {
-            nextState.applying(StoreEvent(Timestamped(event, DateTime.now())))
+            nextState.applying(StoreEvent(event))
           } else {
             nextState.applying(DoNotStoreEvent)
           }
         nextStateWithApply.andThen { data =>
           // We have to wait until after the events have persisted to send our
-          // reply, instead of using `.replying` to send it synchronously, so
-          // that the sender will get the new event with its timestamp. True
-          // CQRS wouldn't do this, and instead make the sender listen for a
-          // change event. Perhaps we should send a ResultPreview message?
+          // reply, instead of using `.replying` to send it before the
+          // transition, just to make sure.
           replyTo ! v.toResult(data.eventList)
         }
 
@@ -313,7 +327,12 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
 
   object EventLog extends Serializable {
     /** Convenience method for the props to instantiate the EventLog actor */
-    def props(scope: String, validationTimeout: FiniteDuration) = Props(new EventLog(scope, validationTimeout))
+    def props(
+      scope:             String,
+      validationTimeout: FiniteDuration,
+      journalPluginId:   String,
+      snapshotPluginId:  String
+    ) = Props(new EventLog(scope, validationTimeout, journalPluginId, snapshotPluginId))
   }
 
   // Data types for EventLog
@@ -334,14 +353,14 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                                consideration, to ensure atomicity.
    * @param eventList list of events stored in the scope
    */
-  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[Timestamped[EventType]]) {
+  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[EventType]) {
     def consideringEventFromSender(event: EventType, replyTo: ActorRef): EventLogData =
       copy(eventUnderConsiderationAndSender = Some(event, replyTo))
 
     def consideringNothing: EventLogData =
       copy(eventUnderConsiderationAndSender = None)
 
-    def storingEvent(eventToStore: Timestamped[EventType]): EventLogData =
+    def storingEvent(eventToStore: EventType): EventLogData =
       consideringNothing.copy(eventList = eventList :+ eventToStore)
   }
 
@@ -353,6 +372,6 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    */
   sealed trait EventLogInternalEvent
   case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent with Serializable
-  case class StoreEvent(storedEvent: Timestamped[EventType]) extends EventLogInternalEvent with Serializable
+  case class StoreEvent(storedEvent: EventType) extends EventLogInternalEvent with Serializable
   case object DoNotStoreEvent extends EventLogInternalEvent with Serializable
 }

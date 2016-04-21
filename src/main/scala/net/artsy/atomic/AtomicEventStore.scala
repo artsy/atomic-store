@@ -1,6 +1,7 @@
 package net.artsy.atomic
 
 import akka.actor._
+import akka.event.LoggingReceive
 import akka.persistence.fsm.PersistentFSM
 import akka.persistence.fsm.PersistentFSM.FSMState
 
@@ -199,7 +200,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
       targetLog
     }
 
-    def receive = {
+    def receive = LoggingReceive {
       case ScopedMessage(scope, message) =>
         liveLogForScope(scope).forward(message)
 
@@ -240,10 +241,12 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
     validationTimeout:             FiniteDuration,
     override val journalPluginId:  String,
     override val snapshotPluginId: String
-  ) extends PersistentFSM[EventLogState, EventLogData, EventLogInternalEvent] with Stash {
+  ) extends PersistentFSM[EventLogState, Seq[EventType], EventType] with Stash {
 
     // Separate the logs in the database by scopes
     def persistenceId: String = s"domainEvents:$scopeId"
+
+    var transientState: Option[TransientState] = None
 
     /**
      * StateFunction for managing queries. This is factored out so that it can
@@ -251,30 +254,28 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
      * always available.
      */
     val handleQuery: StateFunction = {
-      case Event(QueryEvents, data) =>
-        stay().replying(data.eventList)
+      case Event(QueryEvents, storedEvents) =>
+        stay().replying(storedEvents)
     }
 
     // Events are persisted only when applied by the FSM below.
-    def applyEvent(domainEvent: EventLogInternalEvent, currentData: EventLogData): EventLogData =
-      domainEvent match {
-        case ConsiderEventFromSender(event, replyTo) => currentData.consideringEventFromSender(event, replyTo)
-        case StoreEvent(storedEvent)                 => currentData.storingEvent(storedEvent)
-        case DoNotStoreEvent                         => currentData.consideringNothing
-      }
+    def applyEvent(domainEvent: EventType, currentData: Seq[EventType]): Seq[EventType] =
+      currentData :+ domainEvent
 
-    startWith(EventLogAvailable, EventLogData(None, Nil))
+    startWith(EventLogAvailable, Seq.empty)
 
     // Open for processing
     when(EventLogAvailable)(handleQuery orElse {
-      case Event(StoreIfValid(event), data) =>
-        goto(EventLogBusyValidating).applying(ConsiderEventFromSender(event, sender())).replying(ValidationRequest(event, data.eventList))
+      case Event(StoreIfValid(event), eventList) =>
+        goto(EventLogBusyValidating).replying(ValidationRequest(event, eventList)).andThen { _ =>
+          transientState = Some(TransientState(event, sender()))
+        }
     })
 
     // While waiting for the sender to validate the event, hold off any others.
     when(EventLogBusyValidating, stateTimeout = validationTimeout)(handleQuery orElse {
       // Validation succeeded
-      case Event(v @ ValidationResponse(wasAccepted, event, _), EventLogData(Some((eventUnderConsideration, _)), _)) if event == eventUnderConsideration =>
+      case Event(v @ ValidationResponse(wasAccepted, event, _), _) if transientState.exists(_.eventUnderConsideration == event) =>
         // We're going to reply to `sender` instead of the stored `replyTo`.
         // This is to enable the client to operate using the `ask` pattern,
         // which uses a fresh actorRef for each round.
@@ -283,28 +284,28 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
         val nextState = goto(EventLogAvailable)
         val nextStateWithApply =
           if (wasAccepted) {
-            nextState.applying(StoreEvent(event))
+            nextState.applying(event)
           } else {
-            nextState.applying(DoNotStoreEvent)
+            nextState
           }
-        nextStateWithApply.andThen { data =>
+        nextStateWithApply.andThen { eventList =>
           // We have to wait until after the events have persisted to send our
           // reply, instead of using `.replying` to send it before the
           // transition, just to make sure.
-          replyTo ! v.toResult(data.eventList)
+          replyTo ! v.toResult(eventList)
         }
 
       // If we timeout, let the sender know. There should be data stored about
       // the event-under-consideration and its sender, so reply back with a
       // Result, if we can.
-      case Event(StateTimeout, EventLogData(considerationData, _)) =>
-        val nextState = goto(EventLogAvailable).applying(DoNotStoreEvent)
+      case Event(StateTimeout, _) =>
+        val nextState = goto(EventLogAvailable)
 
         // Reply, if we can.
-        considerationData match {
-          case Some((event, replyTo)) =>
-            nextState.andThen { data =>
-              replyTo ! Result(wasAccepted = false, event, data.eventList, Some(timeoutReason))
+        transientState match {
+          case Some(TransientState(event, replyTo)) =>
+            nextState.andThen { eventList =>
+              replyTo ! Result(wasAccepted = false, event, eventList, Some(timeoutReason))
             }
           case _ => nextState
         }
@@ -318,11 +319,13 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
 
     // Start accepting messages when we go available again
     onTransition {
-      case EventLogBusyValidating -> EventLogAvailable => unstashAll()
+      case EventLogBusyValidating -> EventLogAvailable =>
+        transientState = None
+        unstashAll()
     }
 
     // Don't really understand why this is needed to fulfill the trait, but whatevs
-    def domainEventClassTag: ClassTag[EventLogInternalEvent] = implicitly[ClassTag[EventLogInternalEvent]]
+    def domainEventClassTag: ClassTag[EventType] = implicitly[ClassTag[EventType]]
   }
 
   object EventLog extends Serializable {
@@ -346,32 +349,5 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
     override def identifier: String = "busyValidating"
   }
 
-  /**
-   * All state data stored by the log
-   *
-   * @param eventUnderConsiderationAndSender internal record of the event under
-   *                                consideration, to ensure atomicity.
-   * @param eventList list of events stored in the scope
-   */
-  case class EventLogData(eventUnderConsiderationAndSender: Option[(EventType, ActorRef)], eventList: Seq[EventType]) {
-    def consideringEventFromSender(event: EventType, replyTo: ActorRef): EventLogData =
-      copy(eventUnderConsiderationAndSender = Some(event, replyTo))
-
-    def consideringNothing: EventLogData =
-      copy(eventUnderConsiderationAndSender = None)
-
-    def storingEvent(eventToStore: EventType): EventLogData =
-      consideringNothing.copy(eventList = eventList :+ eventToStore)
-  }
-
-  /**
-   * All possible modifications to the EventLog stored data and state
-   *
-   * `replyTo` is only stored for timeouts. We reply to `sender` instead in
-   * normal operation.
-   */
-  sealed trait EventLogInternalEvent
-  case class ConsiderEventFromSender(event: EventType, replyTo: ActorRef) extends EventLogInternalEvent with Serializable
-  case class StoreEvent(storedEvent: EventType) extends EventLogInternalEvent with Serializable
-  case object DoNotStoreEvent extends EventLogInternalEvent with Serializable
+  case class TransientState(eventUnderConsideration: EventType, replyTo: ActorRef)
 }

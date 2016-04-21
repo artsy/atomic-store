@@ -23,7 +23,7 @@ Include the following line in your `build.sbt`:
 
 ```
 libraryDependencies ++= Seq(
-  "net.artsy" %% "atomic-store" % "0.0.2")
+  "net.artsy" %% "atomic-store" % "0.0.3")
 ```
 
 In a project, it's likely you will want some sort of server-push mechanism to notify clients of new events. Rather than containing this logic. This code can likely be located within the same logic that does the validation.
@@ -63,9 +63,13 @@ For reference on this process, you may want to see the following links:
 ## Todos
 
 - Akka Clustering support for failover.
-- Support for configurable serialization.
+- Document support for configurable serialization.
+- Testing of complicated random flows of events, validations, and timeouts.
   
 ## Changelog
+
+*0.0.3*
+- Factor out transient state data from what is persisted. It is unlikely to be of any use upon recovery, anyway.
 
 *0.0.2*
 - Remove `Timestamped`. It's not crucial to the logic of this library, so let the client own all of the metadata it wants to associate with its events.

@@ -2,8 +2,11 @@ package net.artsy.atomic
 
 import akka.actor._
 import akka.testkit._
+import org.scalacheck.{ Arbitrary, Gen }
 import org.scalatest._
-import scala.concurrent.duration.{ FiniteDuration, DurationInt }
+import org.scalatest.prop.PropertyChecks
+
+import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 /** Simply echos incoming messages */
 class EchoActor extends Actor {
@@ -14,9 +17,21 @@ class EchoActor extends Actor {
 
 // Declare test types for events and validations. These have to be declared
 // outside the Spec's scope for serialization purposes.
-sealed trait TestEvent extends Serializable { def scopeId: String }
+sealed trait TestEvent extends Serializable {
+  def scopeId: String
+  def withScopeId(id: String) = this match {
+    case TestEvent1(_) => TestEvent1(id)
+    case TestEvent2(_) => TestEvent2(id)
+    case TestEvent3(_) => TestEvent3(id)
+    case TestEvent4(_) => TestEvent4(id)
+    case TestEvent5(_) => TestEvent5(id)
+  }
+}
 case class TestEvent1(scopeId: String) extends TestEvent
 case class TestEvent2(scopeId: String) extends TestEvent
+case class TestEvent3(scopeId: String) extends TestEvent
+case class TestEvent4(scopeId: String) extends TestEvent
+case class TestEvent5(scopeId: String) extends TestEvent
 object TestEvent extends Serializable {
   implicit val testEventScoped: Scoped[TestEvent] = new Scoped[TestEvent] {
     def scopeIdentifier(domainEvent: TestEvent): String = domainEvent.scopeId
@@ -29,12 +44,26 @@ case object ArbitraryRejectionReason extends ValidationReason
 
 object TestEventStore extends AtomicEventStore[TestEvent, ValidationReason](Timeout)
 
+/**
+ * Spec for the AtomicEventStore
+ *
+ * NOTE: when developing specs, it is important to ensure that each test case
+ * uses `expect` to consume all messages sent back to the test actor.
+ * Otherwise, messages like replies and timeouts can arrive unexpectedly within
+ * other test cases. This could also be fixed by using separate TestProbes for
+ * each test case, but for right now, the solution is just to write clean test
+ * cases.
+ */
 class AtomicEventStoreSpec
   extends ImplicitSender
   with WordSpecLike
+  with PropertyChecks
   with Matchers
   with BeforeAndAfterAll
   with TestKitBase {
+
+  implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
+    PropertyCheckConfiguration(minSize = 3, sizeRange = 15, minSuccessful = 20)
 
   import TestEventStore._
 
@@ -92,9 +121,25 @@ class AtomicEventStoreSpec
   def withLog(testCode: (() => (ActorRef, String)) => Any) = {
     val testLogScope = s"test-${UniqueId.next}"
 
-    val logMaker = () => (system.actorOf(EventLog.props(testLogScope, validationTimeout, "", "")), testLogScope)
+    val logMaker = () => (system.actorOf(EventLog.props(testLogScope, validationTimeout, "", ""), testLogScope), testLogScope)
 
     testCode(logMaker)
+  }
+
+  type ScopeId = String
+
+  implicit def arbitraryTestEvent(implicit scopeId: ScopeId): Arbitrary[TestEvent] = Arbitrary {
+    for {
+      eventTypeIndex <- Gen.chooseNum(1, 5)
+    } yield {
+      eventTypeIndex match {
+        case 1 => TestEvent1(scopeId)
+        case 2 => TestEvent2(scopeId)
+        case 3 => TestEvent3(scopeId)
+        case 4 => TestEvent4(scopeId)
+        case 5 => TestEvent5(scopeId)
+      }
+    }
   }
 
   "TestEvent events" must {
@@ -250,19 +295,22 @@ class AtomicEventStoreSpec
         val commandMessage2 = StoreIfValid(event2)
         log ! commandMessage2
 
-        val reply1 = expectMsgPF(hint = "ValidationRequest for first event") { case reply: ValidationRequest => reply }
+        val reply1 = expectMsgPF(hint = "ValidationRequest for first event") { case reply: ValidationRequest if reply.prospectiveEvent == event1 => reply }
         reply1.prospectiveEvent shouldEqual event1
 
         log ! reply1.response(didPass = true)
-        val result = expectMsgPF(hint = "Result for first event") { case result: Result => result }
+        val result = expectMsgPF(hint = "Result for first event") { case result: Result if result.prospectiveEvent == event1 => result }
         result.prospectiveEvent shouldEqual event1
 
-        val reply2 = expectMsgPF(hint = "ValidationRequest for second event") { case reply: ValidationRequest => reply }
+        val reply2 = expectMsgPF(hint = "ValidationRequest for second event") { case reply: ValidationRequest if reply.prospectiveEvent == event2 => reply }
         reply2.prospectiveEvent shouldEqual event2
+
+        log ! reply2.response(didPass = true)
+        expectMsgPF(hint = "Result for second event") { case result: Result if result.prospectiveEvent == event2 => result }
       }
     }
 
-    "discard an event if it is stopped before validation response is received" in withLog { logMaker =>
+    "discard an event if it is stopped before validation response is received (expect a dead letter in the logs)" in withLog { logMaker =>
       within(defaultTimeout) {
         val (log, scopeId) = logMaker()
         watch(log)
@@ -275,6 +323,8 @@ class AtomicEventStoreSpec
         val reply1 = expectMsgPF(hint = "ValidationRequest for first event") { case reply: ValidationRequest => reply }
         reply1.prospectiveEvent shouldEqual event1
 
+        // Because we're killing this log actor, it won't receive its own
+        // timeout message, resulting in a dead letter.
         log ! PoisonPill
         expectMsgPF(hint = "terminated message") { case Terminated(`log`) => }
 
@@ -409,7 +459,7 @@ class AtomicEventStoreSpec
 
     "regenerate dead log actor that had two events, with state intact" in {
       within(defaultTimeout) {
-        val receptionist = system.actorOf(receptionistProps(validationTimeout))
+        val receptionist = system.actorOf(receptionistProps(validationTimeout), "dead-log-regeneration-receptionist")
         val testScope1 = s"test-${UniqueId.next}"
 
         val event1 = TestEvent1(testScope1)
@@ -444,6 +494,47 @@ class AtomicEventStoreSpec
           case storedEvents: List[_] => storedEvents
         }
         queryResult2 shouldEqual List(event1, event2)
+      }
+    }
+
+    "remember a random set of events upon regeneration" in {
+      // This test case persists (or not) a random sequence of events, killing
+      // the event log each time, simulating many start up and shut down
+      // sequences, with modifications.
+
+      implicit val scopeId: ScopeId = ""
+
+      val receptionist = system.actorOf(receptionistProps(validationTimeout), "random-seq-test-receptionist")
+
+      forAll { (eventsAndDecisionsWrongScope: Seq[(TestEvent, Boolean)]) =>
+
+        val testScope = s"test-${UniqueId.next}"
+        val eventsAndDecisions = eventsAndDecisionsWrongScope.map(old => old._1.withScopeId(testScope) -> old._2)
+
+        within(defaultTimeout) {
+          for (esAndDs <- eventsAndDecisions.inits.toSeq.reverse.tail) {
+            val (event, decision) = esAndDs.last
+
+            receptionist ! StoreIfValid(event)
+            val reply = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest if reply.prospectiveEvent == event => reply }
+
+            // Steal a direct reference to the log so we can manage its lifecycle
+            val logRef = lastSender
+
+            receptionist ! reply.response(didPass = decision)
+            val result = expectMsgPF(hint = "Result") { case result: Result if result.prospectiveEvent == event => result }
+
+            result.wasAccepted shouldEqual decision
+
+            cleanup(logRef)
+
+            receptionist ! eventsForScopeQuery(testScope)
+            val queryResult = expectMsgPF(hint = "List of events") {
+              case storedEvents: Seq[_] => storedEvents
+            }
+            queryResult shouldEqual esAndDs.collect { case (e, true) => e }
+          }
+        }
       }
     }
   }

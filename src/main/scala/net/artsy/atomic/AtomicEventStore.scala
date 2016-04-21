@@ -1,6 +1,7 @@
 package net.artsy.atomic
 
 import akka.actor._
+import akka.event.LoggingReceive
 import akka.persistence.fsm.PersistentFSM
 import akka.persistence.fsm.PersistentFSM.FSMState
 
@@ -199,7 +200,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
       targetLog
     }
 
-    def receive = {
+    def receive = LoggingReceive {
       case ScopedMessage(scope, message) =>
         liveLogForScope(scope).forward(message)
 

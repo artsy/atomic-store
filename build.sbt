@@ -7,7 +7,7 @@ import scalariform.formatter.preferences._
 
 name := """atomic-store"""
 
-version := "0.0.2"
+version := "0.0.3-SNAPSHOT"
 
 organization := "net.artsy"
 
@@ -46,11 +46,15 @@ pomExtra := (
 
 // Code settings
 
+val akkaV = "2.4.4"
+
 libraryDependencies ++= Seq(
-  "com.typesafe.akka"         %% "akka-testkit"               % "2.4.2",
-  "org.scalatest"             %% "scalatest"                  % "2.2.6" % "test",
-  "org.iq80.leveldb"          %  "leveldb"                    % "0.7", // For LevelDB journal
-  "org.fusesource.leveldbjni" %  "leveldbjni-all"             % "1.8", // For LevelDB journal
+  "com.typesafe.akka"         %% "akka-actor"                 % akkaV,
+  "com.typesafe.akka"         %% "akka-testkit"               % akkaV,
+  "org.scalatest"             %% "scalatest"                  % "3.0.0-M15" % "test",
+  "org.scalacheck"            %% "scalacheck"                 % "1.12.5" % "test",    // Property-based testing
+  "org.iq80.leveldb"          %  "leveldb"                    % "0.7",                // For LevelDB journal
+  "org.fusesource.leveldbjni" %  "leveldbjni-all"             % "1.8",                // For LevelDB journal
   "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "1.2.8"
 )
 

@@ -63,7 +63,8 @@ For reference on this process, you may want to see the following links:
 ## Todos
 
 - Akka Clustering support for failover.
-- Support for configurable serialization.
+- Document support for configurable serialization.
+- Testing of complicated random flows of events, validations, and timeouts.
   
 ## Changelog
 

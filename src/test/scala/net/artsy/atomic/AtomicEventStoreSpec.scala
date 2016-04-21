@@ -107,9 +107,6 @@ class AtomicEventStoreSpec
 
       val event1 = TestEvent1("blah")
       serialize(event1)
-      serialize(TestEventStore.ConsiderEventFromSender(event1, testActor))
-      serialize(TestEventStore.StoreEvent(event1))
-      serialize(TestEventStore.DoNotStoreEvent)
       serialize(TestEventStore.EventLogAvailable)
       serialize(TestEventStore.EventLogBusyValidating)
     }
@@ -180,7 +177,7 @@ class AtomicEventStoreSpec
         val (log, _) = logMaker()
 
         log ! QueryEvents
-        expectMsgPF(hint = "empty list of events") { case List() => }
+        expectMsgPF(hint = "empty list of events") { case seq: Seq[_] if seq.isEmpty => }
       }
     }
 

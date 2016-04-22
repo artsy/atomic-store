@@ -69,7 +69,7 @@ For reference on this process, you may want to see the following links:
 ## Changelog
 
 *0.0.3*
-- Factor out transient state data from what is persisted. It is unlikely to be of any use upon recovery, anyway.
+- Factor out transient state data from what is persisted. It is unlikely to be of any use upon recovery, anyway. *Important:* this _will_ break compatibility with any existing data that's stored. 
 
 *0.0.2*
 - Remove `Timestamped`. It's not crucial to the logic of this library, so let the client own all of the metadata it wants to associate with its events.

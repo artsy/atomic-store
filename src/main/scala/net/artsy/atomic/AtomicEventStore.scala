@@ -4,9 +4,9 @@ import akka.actor._
 import akka.event.LoggingReceive
 import akka.persistence.fsm.PersistentFSM
 import akka.persistence.fsm.PersistentFSM.FSMState
-
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
+import akka.cluster.singleton._
 
 /**
  * Implements a data-agnostic persistent event store, in the Event Sourcing
@@ -127,6 +127,11 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   }
 
   /**
+   * Message broadcast when the log for a given scope is terminated.
+   */
+  case class ScopeTerminated(scopeId: String)
+
+  /**
    * Sent to the original requester for to request validation. The atomicity of
    * the event log holds off any other prospective events while the validation
    * decision is being made.
@@ -181,35 +186,64 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   class Receptionist(
     logProps: String => Props
   ) extends Actor {
-    var logs = Map.empty[String, ActorRef]
+    var logs = Map.empty[String, LogSingleton]
 
-    def liveLogForScope(scope: String): ActorRef = {
+    def liveLogForScope(scope: String): LogSingleton = {
       val (newLogs, targetLog) = logs.get(scope) match {
         case Some(foundLog) => (logs, foundLog)
         case None =>
-          // Recreate the log, which will recall all preexisting events
-          val materializedLog = context.actorOf(logProps(scope), scope)
+          val system = context.system
+          val singletonProps = ClusterSingletonManager.props(
+            singletonProps     = logProps(scope),
+            terminationMessage = PoisonPill,
+            settings           = ClusterSingletonManagerSettings(system)
+          )
+          val manager = system.actorOf(singletonProps, "EventLog-" + scope)
+          val path = manager.path.toStringWithoutAddress
+
+          val proxyProps = ClusterSingletonProxy.props(
+            singletonManagerPath = "/user/EventLog-" + scope,
+            settings             = ClusterSingletonProxySettings(system)
+          )
+          val proxy = system.actorOf(proxyProps)
 
           // Set up a death watch, so we can remove logs that are terminated
-          context.watch(materializedLog)
+          context.watch(manager)
 
-          (logs + (scope -> materializedLog), materializedLog)
+          val logSingleton = LogSingleton(manager, proxy)
+
+          (logs + (scope -> logSingleton), logSingleton)
       }
-
       logs = newLogs
       targetLog
     }
 
     def receive = LoggingReceive {
-      case ScopedMessage(scope, message) =>
-        liveLogForScope(scope).forward(message)
+      case ScopedMessage(scope, PoisonPill) => {
+        logs.get(scope).foreach { logSingleton =>
+          context.stop(logSingleton.proxy)
+          context.stop(logSingleton.manager)
+        }
+      }
 
+      case ScopedMessage(scope, message) =>
+        liveLogForScope(scope).proxy.forward(message)
+
+      // watch for terminated manager, and remove it from the logs map
       case Terminated(deadActorRef) =>
-        logs = logs.filterNot { case (_, ref) => ref == deadActorRef }
+        val scopeOpt = logs.find(_._2.manager == deadActorRef).map(_._1)
+        scopeOpt match {
+          case Some(scope) =>
+            logs = logs - scope
+            context.system.eventStream.publish(ScopeTerminated(scope))
+          case _ =>
+        }
 
       case GetLiveLogScopes =>
         sender() ! logs.keys.toSet
     }
+
+    case class LogSingleton(manager: ActorRef, proxy: ActorRef)
   }
 
   /**

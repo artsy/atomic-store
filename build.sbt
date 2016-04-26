@@ -7,7 +7,7 @@ import scalariform.formatter.preferences._
 
 name := """atomic-store"""
 
-version := "0.0.3-SNAPSHOT"
+version := "0.0.3"
 
 organization := "net.artsy"
 
@@ -55,7 +55,8 @@ libraryDependencies ++= Seq(
   "org.scalacheck"            %% "scalacheck"                 % "1.12.5" % "test",    // Property-based testing
   "org.iq80.leveldb"          %  "leveldb"                    % "0.7",                // For LevelDB journal
   "org.fusesource.leveldbjni" %  "leveldbjni-all"             % "1.8",                // For LevelDB journal
-  "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "1.2.8"
+  "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "1.2.8",
+  "com.typesafe.akka"         %% "akka-cluster-tools"         % akkaV // for clustering
 )
 
 fork := true

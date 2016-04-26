@@ -198,14 +198,14 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
             terminationMessage = PoisonPill,
             settings           = ClusterSingletonManagerSettings(system)
           )
-          val manager = system.actorOf(singletonProps, "EventLog-" + scope)
+          val manager = context.actorOf(singletonProps, "EventLog-" + scope)
           val path = manager.path.toStringWithoutAddress
 
           val proxyProps = ClusterSingletonProxy.props(
-            singletonManagerPath = "/user/EventLog-" + scope,
+            singletonManagerPath = path,
             settings             = ClusterSingletonProxySettings(system)
           )
-          val proxy = system.actorOf(proxyProps)
+          val proxy = context.actorOf(proxyProps)
 
           // Set up a death watch, so we can remove logs that are terminated
           context.watch(manager)

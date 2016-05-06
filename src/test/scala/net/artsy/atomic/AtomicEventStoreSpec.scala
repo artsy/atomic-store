@@ -162,7 +162,7 @@ class AtomicEventStoreSpec
 
     "initially have no active logs" in withReceptionistAndDummyLogs { receptionist =>
       within(defaultTimeout) {
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         expectMsgPF() {
           case logScopes: Set[_] => logScopes.isEmpty shouldBe true
         }
@@ -176,7 +176,7 @@ class AtomicEventStoreSpec
         receptionist ! commandMessage
         expectMsg(commandMessage)
 
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         expectMsgPF() {
           case logScopes: Set[_] => logScopes.size shouldEqual 1
         }
@@ -185,7 +185,7 @@ class AtomicEventStoreSpec
 
     "remove a log from live logs when it is terminated" in withReceptionistAndDummyLogs { receptionist =>
       within(defaultTimeout) {
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         val logScopes1 = expectMsgPF(hint = "empty scope set") { case logScopes: Set[_] => logScopes }
         logScopes1.size shouldEqual 0
 
@@ -198,7 +198,7 @@ class AtomicEventStoreSpec
         val dummyLogActorRef = lastSender
         watch(dummyLogActorRef)
 
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         val logScopes2 = expectMsgPF(hint = "scope set with one scope") { case logScopes: Set[_] => logScopes }
         logScopes2.size shouldEqual 1
 
@@ -209,7 +209,7 @@ class AtomicEventStoreSpec
         // Not sure it's really sound to assume that the receptionist
         // _definitely_ got the Terminated message yet, but yolo
 
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         val logScopes3 = expectMsgPF(hint = "empty scope set") { case logScopes: Set[_] => logScopes }
         logScopes3.size shouldEqual 0
       }
@@ -221,7 +221,7 @@ class AtomicEventStoreSpec
       within(defaultTimeout) {
         val (log, _) = logMaker()
 
-        log ! QueryEvents
+        log ! QueryEvents()
         expectMsgPF(hint = "empty list of events") { case seq: Seq[_] if seq.isEmpty => }
       }
     }
@@ -258,7 +258,7 @@ class AtomicEventStoreSpec
         log ! reply.response(toAccept)
         expectMsgPF(hint = "Result") { case result: Result => result }
 
-        log ! QueryEvents
+        log ! QueryEvents()
         expectMsgPF(hint = "empty list of events") { case List(`event`) => }
       }
     }
@@ -330,7 +330,7 @@ class AtomicEventStoreSpec
 
         val (rematerializedLog, _) = logMaker()
 
-        rematerializedLog ! QueryEvents
+        rematerializedLog ! QueryEvents()
         expectMsgPF(hint = "Empty event list") { case List() => }
       }
     }
@@ -366,7 +366,7 @@ class AtomicEventStoreSpec
         log ! reply3.response(didPass = true)
         expectMsgPF(hint = "Result") { case result: Result => result }
 
-        log ! QueryEvents
+        log ! QueryEvents()
         val events = expectMsgPF(hint = "empty list of events") {
           case storedEvents: List[_] => storedEvents
         }

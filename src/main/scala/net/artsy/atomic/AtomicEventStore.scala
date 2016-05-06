@@ -102,8 +102,14 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    */
   case class Envelope[MessageType](scopeId: String, message: MessageType) extends ScopedMessage
 
-  /** Asks a log for its list of events */
-  case object QueryEvents
+  /**
+   * Asks a log for its list of events
+   *
+   * NOTE: This is intentionally a class, so that deserialization works
+   * correctly. Having it as an inner case object was causing remote Atomic
+   * Store instances not to recognize the message as their own singleton.
+   */
+  case class QueryEvents()
 
   /**
    * Ask for the events from a specific log
@@ -111,7 +117,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * @param scopeId log scope
    * @return a message the receptionist can forward to the log
    */
-  def eventsForScopeQuery(scopeId: String) = Envelope(scopeId, QueryEvents)
+  def eventsForScopeQuery(scopeId: String) = Envelope(scopeId, QueryEvents())
 
   /**
    * A command to consider an incoming event. A [[ValidationRequest]] will be
@@ -164,7 +170,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[EventType], reason: Option[ValidationReason])
 
   /** Diagnostic query to inspect live log actors */
-  case object GetLiveLogScopes
+  case class GetLiveLogScopes()
 
   ///////////
   // Actors
@@ -207,7 +213,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
       case Terminated(deadActorRef) =>
         logs = logs.filterNot { case (_, ref) => ref == deadActorRef }
 
-      case GetLiveLogScopes =>
+      case GetLiveLogScopes() =>
         sender() ! logs.keys.toSet
     }
   }
@@ -254,7 +260,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
      * always available.
      */
     val handleQuery: StateFunction = {
-      case Event(QueryEvents, storedEvents) =>
+      case Event(QueryEvents(), storedEvents) =>
         stay().replying(storedEvents)
     }
 

@@ -62,14 +62,14 @@ For reference on this process, you may want to see the following links:
   
 ## Todos
 
-- Akka Clustering support for failover.
-- Document support for configurable serialization.
+- Define protobuf serializer for messages and document support for configurable serialization.
 - Testing of complicated random flows of events, validations, and timeouts.
   
 ## Changelog
 
 *0.0.4*
 - Remove clustering code (client code may manage Receptionist as a Cluster Singleton if needed)
+- Convert nested singleton messages to case classes, for proper deserialization.
 
 *0.0.3*
 - Factor out transient state data from what is persisted. It is unlikely to be of any use upon recovery, anyway. *Important:* this _will_ break compatibility with any existing data that's stored.

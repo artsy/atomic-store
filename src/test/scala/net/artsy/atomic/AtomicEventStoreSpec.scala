@@ -1,18 +1,17 @@
 package net.artsy.atomic
 
 import akka.actor._
-import akka.cluster.Cluster
 import akka.testkit._
 import org.scalacheck.{ Arbitrary, Gen }
 import org.scalatest._
 import org.scalatest.prop.PropertyChecks
+
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 /** Simply echos incoming messages */
 class EchoActor extends Actor {
   def receive = {
-    case msg =>
-      sender() ! msg
+    case msg => sender() ! msg
   }
 }
 
@@ -73,8 +72,6 @@ class AtomicEventStoreSpec
   //
 
   implicit lazy val system = ActorSystem()
-  val cluster = Cluster(system)
-  cluster.join(cluster.selfAddress)
 
   override def afterAll = {
     TestKit.shutdownActorSystem(system)
@@ -109,13 +106,6 @@ class AtomicEventStoreSpec
     }
   }
 
-  def killLogForScope(receptionist: ActorRef, scope: String) = {
-    system.eventStream.subscribe(testActor, classOf[ScopeTerminated])
-    receptionist ! Envelope(scope, PoisonPill)
-    expectMsg(ScopeTerminated(scope))
-    system.eventStream.unsubscribe(testActor, classOf[ScopeTerminated])
-  }
-
   /** Loan fixture for setting up receptionist with dummy logs */
   def withReceptionistAndDummyLogs(testCode: (ActorRef) => Any) = {
     // For test purposes, inject a factory that makes spies instead of logs for
@@ -125,7 +115,6 @@ class AtomicEventStoreSpec
     val receptionist = system.actorOf(Props[Receptionist](new Receptionist(dummyLogFactory)))
 
     testCode(receptionist)
-    cleanup(receptionist)
   }
 
   /** Loan fixture for setting up a simple log */
@@ -169,10 +158,11 @@ class AtomicEventStoreSpec
   }
 
   "Receptionist" must {
+    val scope = "testScope"
 
     "initially have no active logs" in withReceptionistAndDummyLogs { receptionist =>
       within(defaultTimeout) {
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         expectMsgPF() {
           case logScopes: Set[_] => logScopes.isEmpty shouldBe true
         }
@@ -181,13 +171,12 @@ class AtomicEventStoreSpec
 
     "create an active log and forward an incoming command to it" in withReceptionistAndDummyLogs { receptionist =>
       within(defaultTimeout) {
-        val scope = s"test-${UniqueId.next}"
         val event = TestEvent1(scope)
         val commandMessage = StoreIfValid(event)
         receptionist ! commandMessage
         expectMsg(commandMessage)
 
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         expectMsgPF() {
           case logScopes: Set[_] => logScopes.size shouldEqual 1
         }
@@ -196,9 +185,7 @@ class AtomicEventStoreSpec
 
     "remove a log from live logs when it is terminated" in withReceptionistAndDummyLogs { receptionist =>
       within(defaultTimeout) {
-        val scope = s"test-${UniqueId.next}"
-
-        receptionist ! GetLiveLogScopes
+        receptionist ! GetLiveLogScopes()
         val logScopes1 = expectMsgPF(hint = "empty scope set") { case logScopes: Set[_] => logScopes }
         logScopes1.size shouldEqual 0
 
@@ -206,14 +193,23 @@ class AtomicEventStoreSpec
         receptionist ! commandMessage
         expectMsg(commandMessage)
 
-        receptionist ! GetLiveLogScopes
+        // We can take advantage of the leaked actor ref so that we can put a
+        // death watch on the actor to synchronize the last part of the test.
+        val dummyLogActorRef = lastSender
+        watch(dummyLogActorRef)
+
+        receptionist ! GetLiveLogScopes()
         val logScopes2 = expectMsgPF(hint = "scope set with one scope") { case logScopes: Set[_] => logScopes }
         logScopes2.size shouldEqual 1
 
         // Terminate the log
-        killLogForScope(receptionist, scope)
+        dummyLogActorRef ! PoisonPill
+        expectMsgPF(hint = "Terminated message for the dummy log actor") { case Terminated(`dummyLogActorRef`) => }
 
-        receptionist ! GetLiveLogScopes
+        // Not sure it's really sound to assume that the receptionist
+        // _definitely_ got the Terminated message yet, but yolo
+
+        receptionist ! GetLiveLogScopes()
         val logScopes3 = expectMsgPF(hint = "empty scope set") { case logScopes: Set[_] => logScopes }
         logScopes3.size shouldEqual 0
       }
@@ -225,7 +221,7 @@ class AtomicEventStoreSpec
       within(defaultTimeout) {
         val (log, _) = logMaker()
 
-        log ! QueryEvents
+        log ! QueryEvents()
         expectMsgPF(hint = "empty list of events") { case seq: Seq[_] if seq.isEmpty => }
       }
     }
@@ -262,7 +258,7 @@ class AtomicEventStoreSpec
         log ! reply.response(toAccept)
         expectMsgPF(hint = "Result") { case result: Result => result }
 
-        log ! QueryEvents
+        log ! QueryEvents()
         expectMsgPF(hint = "empty list of events") { case List(`event`) => }
       }
     }
@@ -334,7 +330,7 @@ class AtomicEventStoreSpec
 
         val (rematerializedLog, _) = logMaker()
 
-        rematerializedLog ! QueryEvents
+        rematerializedLog ! QueryEvents()
         expectMsgPF(hint = "Empty event list") { case List() => }
       }
     }
@@ -370,7 +366,7 @@ class AtomicEventStoreSpec
         log ! reply3.response(didPass = true)
         expectMsgPF(hint = "Result") { case result: Result => result }
 
-        log ! QueryEvents
+        log ! QueryEvents()
         val events = expectMsgPF(hint = "empty list of events") {
           case storedEvents: List[_] => storedEvents
         }
@@ -488,13 +484,17 @@ class AtomicEventStoreSpec
         }
         queryResult1 shouldEqual List(event1, event2)
 
-        killLogForScope(receptionist, testScope1)
+        cleanup(receptionist)
 
-        receptionist ! eventsForScopeQuery(testScope1)
+        val receptionist2 = system.actorOf(receptionistProps(validationTimeout), "revived-receptionist")
+
+        receptionist2 ! eventsForScopeQuery(testScope1)
         val queryResult2 = expectMsgPF(hint = "list of one event") {
           case storedEvents: List[_] => storedEvents
         }
         queryResult2 shouldEqual List(event1, event2)
+
+        cleanup(receptionist2)
       }
     }
 
@@ -505,8 +505,6 @@ class AtomicEventStoreSpec
 
       implicit val scopeId: ScopeId = ""
 
-      val receptionist = system.actorOf(receptionistProps(validationTimeout), "random-seq-test-receptionist")
-
       forAll { (eventsAndDecisionsWrongScope: Seq[(TestEvent, Boolean)]) =>
 
         val testScope = s"test-${UniqueId.next}"
@@ -516,17 +514,20 @@ class AtomicEventStoreSpec
           for (esAndDs <- eventsAndDecisions.inits.toSeq.reverse.tail) {
             val (event, decision) = esAndDs.last
 
+            val receptionist = system.actorOf(receptionistProps(validationTimeout))
+
             receptionist ! StoreIfValid(event)
-            val reply = expectMsgPF(hint = s"ValidationRequest with prospective event $event") { case reply: ValidationRequest if reply.prospectiveEvent == event => reply }
+            val reply = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest if reply.prospectiveEvent == event => reply }
 
             receptionist ! reply.response(didPass = decision)
             val result = expectMsgPF(hint = "Result") { case result: Result if result.prospectiveEvent == event => result }
 
             result.wasAccepted shouldEqual decision
 
-            killLogForScope(receptionist, testScope)
+            cleanup(receptionist)
 
-            receptionist ! eventsForScopeQuery(testScope)
+            val receptionist2 = system.actorOf(receptionistProps(validationTimeout))
+            receptionist2 ! eventsForScopeQuery(testScope)
             val queryResult = expectMsgPF(hint = "List of events") {
               case storedEvents: Seq[_] => storedEvents
             }

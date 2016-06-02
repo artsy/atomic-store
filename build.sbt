@@ -7,7 +7,7 @@ import scalariform.formatter.preferences._
 
 name := """atomic-store"""
 
-version := "0.0.4-SNAPSHOT"
+version := "0.0.4"
 
 organization := "net.artsy"
 

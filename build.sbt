@@ -46,7 +46,7 @@ pomExtra := (
 
 // Code settings
 
-val akkaV = "2.4.4"
+val akkaV = "2.4.6"
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka"         %% "akka-actor"                 % akkaV,
@@ -55,7 +55,7 @@ libraryDependencies ++= Seq(
   "org.scalacheck"            %% "scalacheck"                 % "1.12.5" % "test",    // Property-based testing
   "org.iq80.leveldb"          %  "leveldb"                    % "0.7",                // For LevelDB journal
   "org.fusesource.leveldbjni" %  "leveldbjni-all"             % "1.8",                // For LevelDB journal
-  "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "1.2.13"
+  "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "1.2.14"
 )
 
 fork := true

@@ -64,12 +64,15 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   // Messages
   //
 
+  /** Supertype of messages, for serialization purposes */
+  trait Message
+
   /**
    * Trait for messages that should be routed to a specific log. Using the
    * [[Scoped]] type class for messages that carry events allow those to
    * either be sent to the receptionist or replied to the log directly.
    */
-  trait ScopedMessage extends Serializable {
+  trait ScopedMessage extends Serializable with Message {
     def scopeId: String
   }
 
@@ -109,7 +112,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * correctly. Having it as an inner case object was causing remote Atomic
    * Store instances not to recognize the message as their own singleton.
    */
-  case class QueryEvents()
+  case class QueryEvents() extends Message
 
   /**
    * Ask for the events from a specific log
@@ -139,7 +142,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * @param prospectiveEvent the event to consider
    * @param pastEvents all prior events
    */
-  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[EventType]) {
+  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[EventType]) extends Message {
     def response(didPass: Boolean, reason: Option[ValidationReason] = None) =
       ValidationResponse(didPass, prospectiveEvent, reason)
   }
@@ -167,10 +170,15 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                  the prospective one, in the final position, iff accepted)
    * @param reason the validation reason
    */
-  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[EventType], reason: Option[ValidationReason])
+  case class Result(
+    wasAccepted:      Boolean,
+    prospectiveEvent: EventType,
+    storedEventList:  Seq[EventType],
+    reason:           Option[ValidationReason]
+  ) extends Message
 
   /** Diagnostic query to inspect live log actors */
-  case class GetLiveLogScopes()
+  case class GetLiveLogScopes() extends Message
 
   ///////////
   // Actors

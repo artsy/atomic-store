@@ -7,7 +7,11 @@
 
 **WARNING: This is pre-production software. Use at your own risk. While it will be used in a commercial system soon, it is not currently thoroughly tested, and major features are pending.**
 
-Atomic Store is a system for managing persistent streams of atomic events. It is intended for systems in which only one event can be admitted to the canonical stream at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible. 
+Atomic Store is a system for managing persistent streams of atomic events, with strict consistency. It is intended for systems in which only one event can be admitted to a canonical event log at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible. 
+
+## Philosophy
+
+Atomic Store is built on top of [Akka Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html), which is designed to natively support highly scalable distributed systems with relaxed consistency. A distributed system can [maximize its scalability](https://www.lightbend.com/blog/microservices-101-exploiting-realitys-constraints-with-technology) by reducing coupling between its components, and synchronization of state changes is one such coupling. The general approach to relaxed consistency is to take compensatory actions to rectify inconsistencies between distributed components, in retrospect. But this is complex, and not desirable in all situations. Atomic Store is designed for situations where strict consistency is more desirable or appropriate than extreme scalability.
 
 ## Installation
 
@@ -23,10 +27,115 @@ Include the following line in your `build.sbt`:
 
 ```
 libraryDependencies ++= Seq(
-  "net.artsy" %% "atomic-store" % "0.0.3")
+  "net.artsy" %% "atomic-store" % "0.0.4")
 ```
 
-In a project, it's likely you will want some sort of server-push mechanism to notify clients of new events. Rather than containing this logic. This code can likely be located within the same logic that does the validation.
+Then, in your project, you will want to instantiate an atomic store matching your event types:
+  
+```
+object MyEventStore extends AtomicEventStore[MyEventType, MyRejectionReasonType](myTimeoutReason)   
+```
+
+In your start up code, you'll start the Receptionist actor, which serves as the store's entry point:
+
+```
+case class MyEventStore(
+  storeTimeout:     FiniteDuration,
+  journalPluginId:  String,
+  snapshotPluginId: String
+)(
+  implicit
+  system:  ActorSystem,
+  ec:      ExecutionContextExecutor
+) {
+  import MyEventStore._
+  
+  val receptionist = system.actorOf(receptionistProps(storeTimeout, journalPluginId, snapshotPluginId))
+}
+```
+
+At this point, you'll be able to persist events and check the store by sending messages to the receptionist. 
+
+To work within a cluster, it's important that only one instance of each event log be alive within the cluster. This can be accomplished by instantiating the receptionist as a cluster singleton. This might look like:
+
+```
+case class MyEventStore(
+  storeTimeout:     FiniteDuration,
+  journalPluginId:  String,
+  snapshotPluginId: String
+)(
+  implicit
+  system:  ActorSystem,
+  ec:      ExecutionContextExecutor,
+  timeout: Timeout
+) {
+  import MyEventStore._
+
+  val singletonProps = ClusterSingletonManager.props(
+    singletonProps     = receptionistProps(storeTimeout, journalPluginId, snapshotPluginId),
+    terminationMessage = PoisonPill,
+    settings           = ClusterSingletonManagerSettings(system)
+  )
+  val manager = system.actorOf(singletonProps, "receptionist")
+  
+  val path = manager.path.toStringWithoutAddress
+  val proxyProps = ClusterSingletonProxy.props(
+    singletonManagerPath = path,
+    settings             = ClusterSingletonProxySettings(system)
+  )
+  val receptionist = system.actorOf(proxyProps)
+}
+```
+
+In a project, it's likely you will want some sort of server-push mechanism to notify clients of new events. Rather than containing this logic. This code can likely be located within the handler of the result.
+
+You will likely also want to use Protobuf and a custom serializer for high-performance serialization of messages to and from Atomic Store. A sample `.proto` file:
+
+```
+syntax = "proto2";
+
+package net.artsy.auction.protobuf;
+
+// Lot Event Store messages
+
+message AtomicStoreMessageProto {
+    oneof type {
+        QueryEventsProto query_event = 1;
+        StoreIfValidProto store_if_valid = 2;
+        ValidationRequestProto validation_request = 3;
+        ValidationResponseProto validation_response = 4;
+        ResultProto result = 5;
+    }
+}
+
+message QueryEventsProto {
+    optional string scope_id = 6;
+}
+
+message StoreIfValidProto {
+    optional bytes event = 7;
+}
+
+message ValidationRequestProto {
+    optional bytes prospective_event = 8;
+    repeated bytes past_events = 9;
+}
+
+message ValidationResponseProto {
+    optional bool validation_did_pass = 10;
+    optional bytes event = 11;
+    optional string reason = 12;
+}
+
+message ResultProto {
+    optional bool was_accepted = 13;
+    optional bytes prospective_event = 14;
+    repeated bytes stored_event_list = 15;
+    optional string reason = 16;
+}
+```
+
+In your [Akka Serializer](http://doc.akka.io/docs/akka/2.4.6/scala/serialization.html) implementation, you'll then want to serialize your events themselves to a byte array, perhaps deferring to a separate serializer.
 
 ## Technology
 
@@ -62,11 +171,13 @@ For reference on this process, you may want to see the following links:
   
 ## Todos
 
-- Akka Clustering support for failover.
-- Document support for configurable serialization.
 - Testing of complicated random flows of events, validations, and timeouts.
   
 ## Changelog
+
+*0.0.4*
+- Remove clustering code (client code may manage Receptionist as a Cluster Singleton if needed)
+- Convert nested singleton messages to case classes, for proper deserialization.
 
 *0.0.3*
 - Factor out transient state data from what is persisted. It is unlikely to be of any use upon recovery, anyway. *Important:* this _will_ break compatibility with any existing data that's stored.

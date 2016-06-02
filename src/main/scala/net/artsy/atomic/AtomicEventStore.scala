@@ -6,7 +6,6 @@ import akka.persistence.fsm.PersistentFSM
 import akka.persistence.fsm.PersistentFSM.FSMState
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
-import akka.cluster.singleton._
 
 /**
  * Implements a data-agnostic persistent event store, in the Event Sourcing
@@ -65,12 +64,15 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   // Messages
   //
 
+  /** Supertype of messages, for serialization purposes */
+  trait Message
+
   /**
    * Trait for messages that should be routed to a specific log. Using the
    * [[Scoped]] type class for messages that carry events allow those to
    * either be sent to the receptionist or replied to the log directly.
    */
-  trait ScopedMessage extends Serializable {
+  trait ScopedMessage extends Serializable with Message {
     def scopeId: String
   }
 
@@ -103,8 +105,14 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    */
   case class Envelope[MessageType](scopeId: String, message: MessageType) extends ScopedMessage
 
-  /** Asks a log for its list of events */
-  case object QueryEvents
+  /**
+   * Asks a log for its list of events
+   *
+   * NOTE: This is intentionally a class, so that deserialization works
+   * correctly. Having it as an inner case object was causing remote Atomic
+   * Store instances not to recognize the message as their own singleton.
+   */
+  case class QueryEvents() extends Message
 
   /**
    * Ask for the events from a specific log
@@ -112,7 +120,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * @param scopeId log scope
    * @return a message the receptionist can forward to the log
    */
-  def eventsForScopeQuery(scopeId: String) = Envelope(scopeId, QueryEvents)
+  def eventsForScopeQuery(scopeId: String) = Envelope(scopeId, QueryEvents())
 
   /**
    * A command to consider an incoming event. A [[ValidationRequest]] will be
@@ -127,11 +135,6 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   }
 
   /**
-   * Message broadcast when the log for a given scope is terminated.
-   */
-  case class ScopeTerminated(scopeId: String)
-
-  /**
    * Sent to the original requester for to request validation. The atomicity of
    * the event log holds off any other prospective events while the validation
    * decision is being made.
@@ -139,7 +142,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * @param prospectiveEvent the event to consider
    * @param pastEvents all prior events
    */
-  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[EventType]) {
+  case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[EventType]) extends Message {
     def response(didPass: Boolean, reason: Option[ValidationReason] = None) =
       ValidationResponse(didPass, prospectiveEvent, reason)
   }
@@ -167,10 +170,15 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                  the prospective one, in the final position, iff accepted)
    * @param reason the validation reason
    */
-  case class Result(wasAccepted: Boolean, prospectiveEvent: EventType, storedEventList: Seq[EventType], reason: Option[ValidationReason])
+  case class Result(
+    wasAccepted:      Boolean,
+    prospectiveEvent: EventType,
+    storedEventList:  Seq[EventType],
+    reason:           Option[ValidationReason]
+  ) extends Message
 
   /** Diagnostic query to inspect live log actors */
-  case object GetLiveLogScopes
+  case class GetLiveLogScopes() extends Message
 
   ///////////
   // Actors
@@ -186,64 +194,36 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   class Receptionist(
     logProps: String => Props
   ) extends Actor {
-    var logs = Map.empty[String, LogSingleton]
+    var logs = Map.empty[String, ActorRef]
 
-    def liveLogForScope(scope: String): LogSingleton = {
+    def liveLogForScope(scope: String): ActorRef = {
       val (newLogs, targetLog) = logs.get(scope) match {
         case Some(foundLog) => (logs, foundLog)
         case None =>
-          val system = context.system
-          val singletonProps = ClusterSingletonManager.props(
-            singletonProps     = logProps(scope),
-            terminationMessage = PoisonPill,
-            settings           = ClusterSingletonManagerSettings(system)
-          )
-          val manager = context.actorOf(singletonProps, "EventLog-" + scope)
-          val path = manager.path.toStringWithoutAddress
-
-          val proxyProps = ClusterSingletonProxy.props(
-            singletonManagerPath = path,
-            settings             = ClusterSingletonProxySettings(system)
-          )
-          val proxy = context.actorOf(proxyProps)
+          // Recreate the log, which will recall all preexisting events
+          val materializedLog = context.actorOf(logProps(scope), scope)
 
           // Set up a death watch, so we can remove logs that are terminated
-          context.watch(manager)
+          context.watch(materializedLog)
 
-          val logSingleton = LogSingleton(manager, proxy)
-
-          (logs + (scope -> logSingleton), logSingleton)
+          (logs + (scope -> materializedLog), materializedLog)
       }
+
       logs = newLogs
       targetLog
     }
 
     def receive = LoggingReceive {
-      case ScopedMessage(scope, PoisonPill) => {
-        logs.get(scope).foreach { logSingleton =>
-          context.stop(logSingleton.proxy)
-          context.stop(logSingleton.manager)
-        }
-      }
-
       case ScopedMessage(scope, message) =>
-        liveLogForScope(scope).proxy.forward(message)
+        liveLogForScope(scope).forward(message)
 
-      // watch for terminated manager, and remove it from the logs map
+      // watch for terminated log, and remove it from the logs map
       case Terminated(deadActorRef) =>
-        val scopeOpt = logs.find(_._2.manager == deadActorRef).map(_._1)
-        scopeOpt match {
-          case Some(scope) =>
-            logs = logs - scope
-            context.system.eventStream.publish(ScopeTerminated(scope))
-          case _ =>
-        }
+        logs = logs.filterNot { case (_, ref) => ref == deadActorRef }
 
-      case GetLiveLogScopes =>
+      case GetLiveLogScopes() =>
         sender() ! logs.keys.toSet
     }
-
-    case class LogSingleton(manager: ActorRef, proxy: ActorRef)
   }
 
   /**
@@ -288,7 +268,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
      * always available.
      */
     val handleQuery: StateFunction = {
-      case Event(QueryEvents, storedEvents) =>
+      case Event(QueryEvents(), storedEvents) =>
         stay().replying(storedEvents)
     }
 

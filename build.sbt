@@ -7,7 +7,7 @@ import scalariform.formatter.preferences._
 
 name := """atomic-store"""
 
-version := "0.0.4"
+version := "0.0.5-SNAPSHOT"
 
 organization := "net.artsy"
 
@@ -46,7 +46,7 @@ pomExtra := (
 
 // Code settings
 
-val akkaV = "2.4.6"
+val akkaV = "2.4.7"
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka"         %% "akka-actor"                 % akkaV,

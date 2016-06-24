@@ -125,17 +125,23 @@ message ValidationResponseProto {
     optional bool validation_did_pass = 10;
     optional bytes event = 11;
     optional string reason = 12;
+    optional MetaProto meta = 13;
 }
 
 message ResultProto {
-    optional bool was_accepted = 13;
-    optional bytes prospective_event = 14;
-    repeated bytes stored_event_list = 15;
-    optional string reason = 16;
+    optional bool was_accepted = 14;
+    optional bytes prospective_event = 15;
+    repeated bytes stored_event_list = 16;
+    optional string reason = 17;
+    optional MetaProto meta = 18;
+}
+
+message MetaProto {
+    // Domain-specific fields
 }
 ```
 
-In your [Akka Serializer](http://doc.akka.io/docs/akka/2.4.6/scala/serialization.html) implementation, you'll then want to serialize your events themselves to a byte array, perhaps deferring to a separate serializer.
+In your [Akka Serializer](http://doc.akka.io/docs/akka/current/scala/serialization.html) implementation, you'll then want to serialize your events themselves to a byte array, perhaps deferring to a separate serializer.
 
 ## Technology
 
@@ -174,6 +180,10 @@ For reference on this process, you may want to see the following links:
 - Testing of complicated random flows of events, validations, and timeouts.
   
 ## Changelog
+
+*0.0.5*
+- Add `meta` field to validation process to allow validation code to pass back arbitrary additional information.
+- Bump Akka version to 2.4.7
 
 *0.0.4*
 - Remove clustering code (client code may manage Receptionist as a Cluster Singleton if needed)

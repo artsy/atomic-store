@@ -25,20 +25,20 @@ At the moment, the only thing you can do is execute the tests, by running `test`
 
 Include the following line in your `build.sbt`:
 
-```
+```scala
 libraryDependencies ++= Seq(
   "net.artsy" %% "atomic-store" % "0.0.4")
 ```
 
 Then, in your project, you will want to instantiate an atomic store matching your event types:
   
-```
+```scala
 object MyEventStore extends AtomicEventStore[MyEventType, MyRejectionReasonType](myTimeoutReason)   
 ```
 
 In your start up code, you'll start the Receptionist actor, which serves as the store's entry point:
 
-```
+```scala
 case class MyEventStore(
   storeTimeout:     FiniteDuration,
   journalPluginId:  String,
@@ -58,7 +58,7 @@ At this point, you'll be able to persist events and check the store by sending m
 
 To work within a cluster, it's important that only one instance of each event log be alive within the cluster. This can be accomplished by instantiating the receptionist as a cluster singleton. This might look like:
 
-```
+```scala
 case class MyEventStore(
   storeTimeout:     FiniteDuration,
   journalPluginId:  String,
@@ -91,7 +91,7 @@ In a project, it's likely you will want some sort of server-push mechanism to no
 
 You will likely also want to use Protobuf and a custom serializer for high-performance serialization of messages to and from Atomic Store. A sample `.proto` file:
 
-```
+```scala
 syntax = "proto2";
 
 package net.artsy.auction.protobuf;

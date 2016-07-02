@@ -7,6 +7,13 @@ import akka.persistence.fsm.PersistentFSM.FSMState
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
 
+/** Supertype of messages, for serialization purposes */
+trait Message
+
+trait ScopedMessage extends Serializable with Message {
+  def scopeId: String
+}
+
 /**
  * Implements a data-agnostic persistent event store, in the Event Sourcing
  * methodology. The store is divided into scopes, and within each scope events
@@ -41,6 +48,7 @@ import scala.reflect.ClassTag
  *                          an event validation failed (or succeeded).
  * @param timeoutReason reason object for validations that timeout.
  */
+
 abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, ValidationReason](
   timeoutReason: ValidationReason
 ) extends Serializable {
@@ -60,22 +68,11 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
     snapshotPluginId:  String         = ""
   ) = Props(new Receptionist(EventLog.props(_, validationTimeout, journalPluginId, snapshotPluginId)))
 
-  /////////////
-  // Messages
-  //
-
-  /** Supertype of messages, for serialization purposes */
-  trait Message
-
   /**
    * Trait for messages that should be routed to a specific log. Using the
    * [[Scoped]] type class for messages that carry events allow those to
    * either be sent to the receptionist or replied to the log directly.
    */
-  trait ScopedMessage extends Serializable with Message {
-    def scopeId: String
-  }
-
   object ScopedMessage {
     // This bit of magic lets us pull the scope ID off of messages that are
     // inherently scoped, like events, while allowing unscoped messages to be
@@ -83,6 +80,8 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
     // message, the scope of the envelope is simply discarded.
     def unapply(message: Any): Option[(String, Any)] = {
       message match {
+        // warning generated about "outer reference in this type test cannot be checked at run time"
+        // because ScopedMessage is an inner class
         case msg: ScopedMessage =>
           msg match {
             case Envelope(_, ScopedMessage(scopeId, m)) => Some((scopeId, m))
@@ -203,23 +202,15 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   class Receptionist(
     logProps: String => Props
   ) extends Actor {
-    var logs = Map.empty[String, ActorRef]
+    val logs = scala.collection.mutable.Map.empty[String, ActorRef]
 
-    def liveLogForScope(scope: String): ActorRef = {
-      val (newLogs, targetLog) = logs.get(scope) match {
-        case Some(foundLog) => (logs, foundLog)
-        case None =>
-          // Recreate the log, which will recall all preexisting events
-          val materializedLog = context.actorOf(logProps(scope), scope)
+    def liveLogForScope(scope: String): ActorRef = logs.getOrElseUpdate(scope, createLog(scope))
 
-          // Set up a death watch, so we can remove logs that are terminated
-          context.watch(materializedLog)
-
-          (logs + (scope -> materializedLog), materializedLog)
-      }
-
-      logs = newLogs
-      targetLog
+    // [Re]create the log, which will recall all preexisting events
+    def createLog(scope: String): ActorRef = {
+      val materializedLog = context.actorOf(logProps(scope), scope)
+      context.watch(materializedLog)
+      materializedLog
     }
 
     def receive = LoggingReceive {
@@ -227,8 +218,9 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
         liveLogForScope(scope).forward(message)
 
       // watch for terminated log, and remove it from the logs map
-      case Terminated(deadActorRef) =>
-        logs = logs.filterNot { case (_, ref) => ref == deadActorRef }
+      case Terminated(deadActorRef) => {
+        logs.collectFirst { case (key, `deadActorRef`) => key }.foreach(scope => logs -= scope)
+      }
 
       case GetLiveLogScopes() =>
         sender() ! logs.keys.toSet

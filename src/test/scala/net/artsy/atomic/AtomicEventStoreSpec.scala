@@ -38,6 +38,8 @@ object TestEvent extends Serializable {
   }
 }
 
+case object Meta
+
 sealed trait ValidationReason extends Serializable
 case object Timeout extends ValidationReason
 case object ArbitraryRejectionReason extends ValidationReason
@@ -238,13 +240,13 @@ class AtomicEventStoreSpec
         val reply = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         log ! reply.response(toAccept)
-        val result = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result.wasAccepted shouldEqual toAccept
         result.storedEventList.lastOption.contains(event) shouldBe true
       }
     }
 
-    "store an event for command with a positive validation" in withLog { logMaker =>
+    "store an event for command with a positive validation, passing back a meta object" in withLog { logMaker =>
       within(defaultTimeout) {
         val (log, scopeId) = logMaker()
         val toAccept = true
@@ -255,8 +257,12 @@ class AtomicEventStoreSpec
         log ! commandMessage
         val reply = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
-        log ! reply.response(toAccept)
-        expectMsgPF(hint = "Result") { case result: Result => result }
+        log ! reply.response(toAccept).withMeta(Meta)
+        // You could attempt to match on `: Result[Meta.type]`, but that would
+        // be erased. But then again, the whole message is being typecast
+        // anyway.
+        val result = expectMsgPF(hint = "Result") { case result: Result[_] => result }
+        result.meta should contain(Meta)
 
         log ! QueryEvents()
         expectMsgPF(hint = "empty list of events") { case List(`event`) => }
@@ -275,11 +281,13 @@ class AtomicEventStoreSpec
         log ! commandMessage
         val reply = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
-        log ! reply.response(toAccept, Some(reason))
-        val result = expectMsgPF(hint = "Result") { case result: Result => result }
+        log ! reply.response(toAccept, Some(reason)).withMeta(Meta)
+        val result = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result.wasAccepted shouldEqual toAccept
-        result.reason.contains(reason) shouldBe true
-        result.storedEventList.contains(event) shouldBe false
+        result.reason should contain(reason)
+        result.meta should contain(Meta)
+
+        result.storedEventList should not contain event
       }
     }
 
@@ -299,14 +307,14 @@ class AtomicEventStoreSpec
         reply1.prospectiveEvent shouldEqual event1
 
         log ! reply1.response(didPass = true)
-        val result = expectMsgPF(hint = "Result for first event") { case result: Result if result.prospectiveEvent == event1 => result }
+        val result = expectMsgPF(hint = "Result for first event") { case result: Result[_] if result.prospectiveEvent == event1 => result }
         result.prospectiveEvent shouldEqual event1
 
         val reply2 = expectMsgPF(hint = "ValidationRequest for second event") { case reply: ValidationRequest if reply.prospectiveEvent == event2 => reply }
         reply2.prospectiveEvent shouldEqual event2
 
         log ! reply2.response(didPass = true)
-        expectMsgPF(hint = "Result for second event") { case result: Result if result.prospectiveEvent == event2 => result }
+        expectMsgPF(hint = "Result for second event") { case result: Result[_] if result.prospectiveEvent == event2 => result }
       }
     }
 
@@ -346,7 +354,7 @@ class AtomicEventStoreSpec
         val reply = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         log ! reply.response(didPass = true)
-        expectMsgPF(hint = "Result") { case result: Result => result }
+        expectMsgPF(hint = "Result") { case result: Result[_] => result }
 
         val event2 = TestEvent2(scopeId)
         val commandMessage2 = StoreIfValid(event2)
@@ -355,7 +363,7 @@ class AtomicEventStoreSpec
         val reply2 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         log ! reply2.response(didPass = true)
-        expectMsgPF(hint = "Result") { case result: Result => result }
+        expectMsgPF(hint = "Result") { case result: Result[_] => result }
 
         val event3 = TestEvent1(scopeId)
         val commandMessage3 = StoreIfValid(event3)
@@ -364,7 +372,7 @@ class AtomicEventStoreSpec
         val reply3 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         log ! reply3.response(didPass = true)
-        expectMsgPF(hint = "Result") { case result: Result => result }
+        expectMsgPF(hint = "Result") { case result: Result[_] => result }
 
         log ! QueryEvents()
         val events = expectMsgPF(hint = "empty list of events") {
@@ -391,11 +399,11 @@ class AtomicEventStoreSpec
         val reply2 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         receptionist ! reply1.response(didPass = true)
-        val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result1 = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result1.storedEventList shouldEqual List(event1)
 
         receptionist ! reply2.response(didPass = true)
-        val result2 = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result2 = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result2.storedEventList shouldEqual List(event2)
 
         receptionist ! eventsForScopeQuery(testScope1)
@@ -422,7 +430,7 @@ class AtomicEventStoreSpec
         val reply1 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         receptionist ! reply1.response(didPass = true)
-        val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result1 = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result1.storedEventList shouldEqual List(event1)
       }
     }
@@ -437,7 +445,7 @@ class AtomicEventStoreSpec
         val reply1 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         receptionist ! Envelope("other scope", reply1.response(didPass = true))
-        val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result1 = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result1.storedEventList shouldEqual List(event1)
       }
     }
@@ -452,7 +460,7 @@ class AtomicEventStoreSpec
         val reply1 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         lastSender ! reply1.response(didPass = true)
-        val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result1 = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result1.storedEventList shouldEqual List(event1)
       }
     }
@@ -467,7 +475,7 @@ class AtomicEventStoreSpec
         val reply1 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         receptionist ! reply1.response(didPass = true)
-        val result1 = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result1 = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result1.storedEventList shouldEqual List(event1)
 
         val event2 = TestEvent2(testScope1)
@@ -475,7 +483,7 @@ class AtomicEventStoreSpec
         val reply2 = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest => reply }
 
         receptionist ! reply2.response(didPass = true)
-        val result2 = expectMsgPF(hint = "Result") { case result: Result => result }
+        val result2 = expectMsgPF(hint = "Result") { case result: Result[_] => result }
         result2.storedEventList shouldEqual List(event1, event2)
 
         receptionist ! eventsForScopeQuery(testScope1)
@@ -520,7 +528,7 @@ class AtomicEventStoreSpec
             val reply = expectMsgPF(hint = "ValidationRequest") { case reply: ValidationRequest if reply.prospectiveEvent == event => reply }
 
             receptionist ! reply.response(didPass = decision)
-            val result = expectMsgPF(hint = "Result") { case result: Result if result.prospectiveEvent == event => result }
+            val result = expectMsgPF(hint = "Result") { case result: Result[_] if result.prospectiveEvent == event => result }
 
             result.wasAccepted shouldEqual decision
 

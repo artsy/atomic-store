@@ -144,7 +144,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    */
   case class ValidationRequest(prospectiveEvent: EventType, pastEvents: Seq[EventType]) extends Message {
     def response(didPass: Boolean, reason: Option[ValidationReason] = None) =
-      ValidationResponse(didPass, prospectiveEvent, reason)
+      ValidationResponse[Nothing](didPass, prospectiveEvent, reason)
   }
 
   /**
@@ -154,11 +154,19 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    * @param event the event considered
    * @param reason the reason for the decision. Usually included iff the event
    *               was rejected.
+   * @param meta additional data the validation
    */
-  case class ValidationResponse(validationDidPass: Boolean, event: EventType, reason: Option[ValidationReason]) extends ScopedMessage {
+  case class ValidationResponse[MetaType](
+    validationDidPass: Boolean,
+    event:             EventType,
+    reason:            Option[ValidationReason],
+    meta:              Option[MetaType]         = None
+  ) extends ScopedMessage {
     val scopeId = implicitly[Scoped[EventType]].scopeIdentifier(event)
-    def toResult(events: Seq[EventType]): Result =
-      Result(validationDidPass, event, events, reason)
+
+    def withMeta[NewMetaType](newMeta: NewMetaType): ValidationResponse[NewMetaType] = copy(meta = Some(newMeta))
+
+    def toResult(events: Seq[EventType]): Result[MetaType] = Result(validationDidPass, event, events, reason, meta)
   }
 
   /**
@@ -170,11 +178,12 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
    *                  the prospective one, in the final position, iff accepted)
    * @param reason the validation reason
    */
-  case class Result(
+  case class Result[MetaType](
     wasAccepted:      Boolean,
     prospectiveEvent: EventType,
     storedEventList:  Seq[EventType],
-    reason:           Option[ValidationReason]
+    reason:           Option[ValidationReason],
+    meta:             Option[MetaType]
   ) extends Message
 
   /** Diagnostic query to inspect live log actors */
@@ -289,7 +298,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
     // While waiting for the sender to validate the event, hold off any others.
     when(EventLogBusyValidating, stateTimeout = validationTimeout)(handleQuery orElse {
       // Validation succeeded
-      case Event(v @ ValidationResponse(wasAccepted, event, _), _) if transientState.exists(_.eventUnderConsideration == event) =>
+      case Event(v @ ValidationResponse(wasAccepted, event, _, _), _) if transientState.exists(_.eventUnderConsideration == event) =>
         // We're going to reply to `sender` instead of the stored `replyTo`.
         // This is to enable the client to operate using the `ask` pattern,
         // which uses a fresh actorRef for each round.
@@ -319,7 +328,7 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
         transientState match {
           case Some(TransientState(event, replyTo)) =>
             nextState.andThen { eventList =>
-              replyTo ! Result(wasAccepted = false, event, eventList, Some(timeoutReason))
+              replyTo ! Result(wasAccepted = false, event, eventList, Some(timeoutReason), None)
             }
           case _ => nextState
         }

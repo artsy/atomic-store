@@ -27,7 +27,7 @@ Include the following line in your `build.sbt`:
 
 ```
 libraryDependencies ++= Seq(
-  "net.artsy" %% "atomic-store" % "0.0.4")
+  "net.artsy" %% "atomic-store" % "0.0.5")
 ```
 
 Then, in your project, you will want to instantiate an atomic store matching your event types:
@@ -183,7 +183,7 @@ For reference on this process, you may want to see the following links:
 
 *0.0.5*
 - Add `meta` field to validation process to allow validation code to pass back arbitrary additional information.
-- Bump Akka version to 2.4.7
+- Bump Akka version to 2.4.8
 
 *0.0.4*
 - Remove clustering code (client code may manage Receptionist as a Cluster Singleton if needed)

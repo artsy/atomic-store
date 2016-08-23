@@ -44,6 +44,8 @@ pomExtra := (
     </developer>
   </developers>)
 
+scalacOptions ++= Seq("-unchecked", "-deprecation")
+
 // Code settings
 
 val akkaV = "2.4.8"

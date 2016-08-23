@@ -83,6 +83,8 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
     // message, the scope of the envelope is simply discarded.
     def unapply(message: Any): Option[(String, Any)] = {
       message match {
+        // warning generated about "outer reference in this type test cannot be checked at run time"
+        // because ScopedMessage is an inner class
         case msg: ScopedMessage =>
           msg match {
             case Envelope(_, ScopedMessage(scopeId, m)) => Some((scopeId, m))
@@ -203,23 +205,15 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
   class Receptionist(
     logProps: String => Props
   ) extends Actor {
-    var logs = Map.empty[String, ActorRef]
+    val logs = scala.collection.mutable.Map.empty[String, ActorRef]
 
-    def liveLogForScope(scope: String): ActorRef = {
-      val (newLogs, targetLog) = logs.get(scope) match {
-        case Some(foundLog) => (logs, foundLog)
-        case None =>
-          // Recreate the log, which will recall all preexisting events
-          val materializedLog = context.actorOf(logProps(scope), scope)
+    def liveLogForScope(scope: String): ActorRef = logs.getOrElseUpdate(scope, createLog(scope))
 
-          // Set up a death watch, so we can remove logs that are terminated
-          context.watch(materializedLog)
-
-          (logs + (scope -> materializedLog), materializedLog)
-      }
-
-      logs = newLogs
-      targetLog
+    // [Re]create the log, which will recall all preexisting events
+    def createLog(scope: String): ActorRef = {
+      val materializedLog = context.actorOf(logProps(scope), scope)
+      context.watch(materializedLog)
+      materializedLog
     }
 
     def receive = LoggingReceive {
@@ -227,8 +221,9 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
         liveLogForScope(scope).forward(message)
 
       // watch for terminated log, and remove it from the logs map
-      case Terminated(deadActorRef) =>
-        logs = logs.filterNot { case (_, ref) => ref == deadActorRef }
+      case Terminated(deadActorRef) => {
+        logs.collectFirst { case (key, `deadActorRef`) => key }.foreach(scope => logs -= scope)
+      }
 
       case GetLiveLogScopes() =>
         sender() ! logs.keys.toSet

@@ -5,13 +5,13 @@
 * __State:__ development
 * __Point People:__ [@acjay](https://github.com/acjay)
 
-**WARNING: This is pre-production software. Use at your own risk. While it will be used in a commercial system soon, it is not currently thoroughly tested, and major features are pending.**
-
-Atomic Store is a system for managing persistent streams of atomic events, with strict consistency. It is intended for systems in which only one event can be admitted to a canonical event log at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible. 
+Atomic Store is a system for managing persistent streams of atomic events, with strict consistency. It is intended for systems in which only one event can be admitted to a canonical event log at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible.
 
 ## Philosophy
 
 Atomic Store is built on top of [Akka Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html), which is designed to natively support highly scalable distributed systems with relaxed consistency. A distributed system can [maximize its scalability](https://www.lightbend.com/blog/microservices-101-exploiting-realitys-constraints-with-technology) by reducing coupling between its components, and synchronization of state changes is one such coupling. The general approach to relaxed consistency is to take compensatory actions to rectify inconsistencies between distributed components, in retrospect. But this is complex, and not desirable in all situations. Atomic Store is designed for situations where strict consistency is more desirable or appropriate than extreme scalability.
+
+In the actor framework, individual actors are single-threaded and cannot be preempted mid-process. Consequently, consistency is guaranteed in the course of processing a message. This would be perfect for atomic validation+persistence, except for the fact that it's desirable to have validation potentially be asynchronous. Akka, out of the box, does not provide an answer for this. It's pretty easy to achieve this behavior with an actor stashes incoming messages while it is awaiting validation of the current one, and that's exactly what this project accomplishes.
 
 ## Installation
 

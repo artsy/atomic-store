@@ -48,15 +48,13 @@ scalacOptions ++= Seq("-unchecked", "-deprecation")
 
 // Code settings
 
-val akkaV = "2.5.0"
+val akkaV = "2.5.1"
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka"         %% "akka-actor"                 % akkaV,
   "com.typesafe.akka"         %% "akka-testkit"               % akkaV,
   "org.scalatest"             %% "scalatest"                  % "3.0.1"  % "test",
   "org.scalacheck"            %% "scalacheck"                 % "1.13.4" % "test",    // Property-based testing
-  "org.iq80.leveldb"          %  "leveldb"                    % "0.9",                // For LevelDB journal
-  "org.fusesource.leveldbjni" %  "leveldbjni-all"             % "1.8",                // For LevelDB journal
   "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "2.5.0.0"
 )
 

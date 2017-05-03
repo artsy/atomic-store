@@ -9,40 +9,12 @@ name := """atomic-store"""
 
 version := "0.0.6-SNAPSHOT"
 
-organization := "net.artsy"
-
-homepage := Some(url("https://github.com/artsy/atomic-store"))
-
-licenses +=("MIT", url("https://opensource.org/licenses/MIT"))
-
 scalaVersion := "2.11.11"
 
 resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven"
 
+sonatypeProfileName := "net.artsy"
 publishMavenStyle := true
-
-publishTo := {
-  val nexus = "https://oss.sonatype.org/"
-  if (isSnapshot.value)
-    Some("snapshots" at nexus + "content/repositories/snapshots")
-  else
-    Some("releases"  at nexus + "service/local/staging/deploy/maven2")
-}
-
-publishArtifact in Test := false
-
-pomExtra := (
-  <scm>
-    <url>git@github.com:artsy/atomic-store.git</url>
-    <connection>scm:git:git@github.com:artsy/atomic-store.git</connection>
-  </scm>
-  <developers>
-    <developer>
-      <id>acjay</id>
-      <name>Alan Johnson</name>
-      <url>http://www.acjay.com</url>
-    </developer>
-  </developers>)
 
 scalacOptions ++= Seq("-unchecked", "-deprecation")
 

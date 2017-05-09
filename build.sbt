@@ -15,6 +15,7 @@ resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven"
 
 sonatypeProfileName := "net.artsy"
 publishMavenStyle := true
+pgpPassphrase := Some(scala.util.Properties.envOrElse("GPG_PASS", "gpg-password").toArray)
 
 scalacOptions ++= Seq("-unchecked", "-deprecation")
 

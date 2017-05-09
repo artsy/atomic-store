@@ -7,6 +7,13 @@ import akka.persistence.fsm.PersistentFSM.FSMState
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
 
+/** Supertype of messages, for serialization purposes */
+trait Message
+
+trait ScopedMessage extends Serializable with Message {
+  def scopeId: String
+}
+
 /**
  * Implements a data-agnostic persistent event store, in the Event Sourcing
  * methodology. The store is divided into scopes, and within each scope events
@@ -41,6 +48,7 @@ import scala.reflect.ClassTag
  *                          an event validation failed (or succeeded).
  * @param timeoutReason reason object for validations that timeout.
  */
+
 abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, ValidationReason](
   timeoutReason: ValidationReason
 ) extends Serializable {
@@ -60,22 +68,11 @@ abstract class AtomicEventStore[EventType <: Serializable: Scoped: ClassTag, Val
     snapshotPluginId:  String         = ""
   ) = Props(new Receptionist(EventLog.props(_, validationTimeout, journalPluginId, snapshotPluginId)))
 
-  /////////////
-  // Messages
-  //
-
-  /** Supertype of messages, for serialization purposes */
-  trait Message
-
   /**
    * Trait for messages that should be routed to a specific log. Using the
    * [[Scoped]] type class for messages that carry events allow those to
    * either be sent to the receptionist or replied to the log directly.
    */
-  trait ScopedMessage extends Serializable with Message {
-    def scopeId: String
-  }
-
   object ScopedMessage {
     // This bit of magic lets us pull the scope ID off of messages that are
     // inherently scoped, like events, while allowing unscoped messages to be

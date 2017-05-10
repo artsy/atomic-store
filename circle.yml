@@ -23,9 +23,11 @@ deployment:
   staging:
     branch: development
     commands: 
+     - sonatypeOpen "net.artsy"
      - sbt publishSigned
   production:
     branch: master
-    commands: 
+    commands:
+     - cp project/sonatype.sbt ~/.sbt/0.13/
      - sbt publishSigned
      - sbt sonatypeRelease

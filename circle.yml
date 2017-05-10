@@ -18,7 +18,7 @@ test:
         parallel: true
 deployment:
   staging:
-    branch: ci-test
+    branch: development
     commands: 
      - sbt publishSigned
   production:

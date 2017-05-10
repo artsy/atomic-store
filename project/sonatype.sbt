@@ -1,8 +1,7 @@
-credentials += Credentials("Sonatype Nexus Repository Manager",
-  "oss.sonatype.org",
-  scala.util.Properties.envOrElse("SONATYPE_USER", "sonatype-user"),
-  scala.util.Properties.envOrElse("SONATYPE_PASS", "password")
-)
+val user = scala.util.Properties.envOrElse("SONATYPE_USER", "sonatype-user")
+val pass = scala.util.Properties.envOrElse("SONATYPE_PASS", "password")
+
+credentials += Credentials("Sonatype Nexus Repository Manager", "oss.sonatype.org", user, pass)
 
 pomExtra in Global := {
   <url>https://github.com/artsy/atomic-store</url>

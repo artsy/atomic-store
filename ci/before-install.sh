@@ -2,7 +2,6 @@
 
 set -e
 
-openssl aes-256-cbc -K $encrypted_c25aa352ba20_key -iv $encrypted_c25aa352ba20_iv \
-  -in codesigning.asc.enc -out ci/codesigning.asc -d
+openssl enc -in codesigning.asc.enc -out codesigning.asc -d -aes256 -k $ENCRYPTION_KEY
 
-gpg --fast-import ci/codesigning.asc
+gpg --fast-import codesigning.asc

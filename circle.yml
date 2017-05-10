@@ -1,0 +1,28 @@
+machine:
+  java:
+    version: openjdk8
+  environment:
+    SBT_VERSION: 0.13.15
+dependencies:
+  pre:
+    - wget -q https://dl.bintray.com/sbt/debian/sbt-$SBT_VERSION.deb
+    - sudo dpkg -i sbt-$SBT_VERSION.deb
+    - ./ci/before-install.sh
+  cache_directories:
+    - "~/.ivy2"
+    - "~/.m2"
+    - "~/.sbt"
+test:
+  override:
+    - case $CIRCLE_NODE_INDEX in 0) sbt ++2.11.8 test ;; 1) sbt ++2.11.11 test ;; 2) sbt ++2.12.2 test ;; esac:
+        parallel: true
+deployment:
+  staging:
+    branch: ci-test
+    commands: 
+     - sbt publishSigned
+  production:
+    branch: master
+    commands: 
+     - sbt publishSigned
+     - sbt sonatypeRelease

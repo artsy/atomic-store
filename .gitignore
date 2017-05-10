@@ -67,5 +67,5 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
-# encrypted file
-ci/*.asc
+# secrets file, unencrypted version
+*.asc

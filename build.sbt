@@ -13,7 +13,7 @@ scalaVersion := "2.11.11"
 
 resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven"
 
-sonatypeProfileName := "net.artsy"
+organization := "net.artsy"
 publishMavenStyle := true
 pgpPassphrase := Some(scala.util.Properties.envOrElse("GPG_PASS", "gpg-password").toArray)
 

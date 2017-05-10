@@ -69,3 +69,6 @@ $RECYCLE.BIN/
 
 # secrets file, unencrypted version
 *.asc
+
+# Ensime for VSCode
+.ensime*

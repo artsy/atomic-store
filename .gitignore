@@ -67,3 +67,8 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+# secrets file, unencrypted version
+*.asc
+
+# Ensime for VSCode
+.ensime*

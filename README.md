@@ -2,43 +2,40 @@
 
 ## Meta
 
-* __State:__ development
+* __State:__ production
 * __Point People:__ [@acjay](https://github.com/acjay)
+* __Point People:__ [@bhoggard](https://github.com/bhoggard)
 
-**WARNING: This is pre-production software. Use at your own risk. While it will be used in a commercial system soon, it is not currently thoroughly tested, and major features are pending.**
-
-Atomic Store is a system for managing persistent streams of atomic events, with strict consistency. It is intended for systems in which only one event can be admitted to a canonical event log at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible. 
+Atomic Store is a system for managing persistent streams of atomic events, with strict consistency. It is intended for systems in which only one event can be admitted to a canonical event log at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible.
 
 ## Philosophy
 
 Atomic Store is built on top of [Akka Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html), which is designed to natively support highly scalable distributed systems with relaxed consistency. A distributed system can [maximize its scalability](https://www.lightbend.com/blog/microservices-101-exploiting-realitys-constraints-with-technology) by reducing coupling between its components, and synchronization of state changes is one such coupling. The general approach to relaxed consistency is to take compensatory actions to rectify inconsistencies between distributed components, in retrospect. But this is complex, and not desirable in all situations. Atomic Store is designed for situations where strict consistency is more desirable or appropriate than extreme scalability.
 
-## Installation
-
-Atomic Store includes a copy of [Typesafe Activator](http://www.typesafe.com/community/core-tools/activator-and-sbt), which can be used to load the project prompt with `./activator`. You might also choose to install Activator globally on your system.
+In the actor framework, individual actors are single-threaded and cannot be preempted mid-process. Consequently, consistency is guaranteed in the course of processing a message. This would be perfect for atomic validation+persistence, except for the fact that it's desirable to have validation potentially be asynchronous. Akka, out of the box, does not provide an answer for this. It's pretty easy to achieve this behavior with an actor stashes incoming messages while it is awaiting validation of the current one, and that's exactly what this project accomplishes.
 
 ## Running
 
-At the moment, the only thing you can do is execute the tests, by running `test` from Activator/SBT prompt.
+At the moment, the only thing you can do is execute the tests, by running `test` from the SBT prompt.
 
 ## Integrating into a project
 
 Include the following line in your `build.sbt`:
 
-```
+```scala
 libraryDependencies ++= Seq(
-  "net.artsy" %% "atomic-store" % "0.0.5")
+  "net.artsy" %% "atomic-store" % "0.0.6")
 ```
 
 Then, in your project, you will want to instantiate an atomic store matching your event types:
   
-```
+```scala
 object MyEventStore extends AtomicEventStore[MyEventType, MyRejectionReasonType](myTimeoutReason)   
 ```
 
 In your start up code, you'll start the Receptionist actor, which serves as the store's entry point:
 
-```
+```scala
 case class MyEventStore(
   storeTimeout:     FiniteDuration,
   journalPluginId:  String,
@@ -58,7 +55,7 @@ At this point, you'll be able to persist events and check the store by sending m
 
 To work within a cluster, it's important that only one instance of each event log be alive within the cluster. This can be accomplished by instantiating the receptionist as a cluster singleton. This might look like:
 
-```
+```scala
 case class MyEventStore(
   storeTimeout:     FiniteDuration,
   journalPluginId:  String,
@@ -91,7 +88,7 @@ In a project, it's likely you will want some sort of server-push mechanism to no
 
 You will likely also want to use Protobuf and a custom serializer for high-performance serialization of messages to and from Atomic Store. A sample `.proto` file:
 
-```
+```scala
 syntax = "proto2";
 
 package net.artsy.auction.protobuf;
@@ -148,9 +145,9 @@ In your [Akka Serializer](http://doc.akka.io/docs/akka/current/scala/serializati
 Atomic Store is built using Scala, the Akka framework, and associated libraries. Specifically, here are the core technologies being used, with links to documentation:
 
 - Scala (see [tutorials](http://docs.scala-lang.org/tutorials/))
-- [Akka](http://doc.akka.io/docs/akka/snapshot/scala.html)
-  - [Actor basics](http://doc.akka.io/docs/akka/snapshot/scala/actors.html)
-  - [Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html)
+- [Akka](http://doc.akka.io/docs/akka/current/scala.html)
+  - [Actor basics](http://doc.akka.io/docs/akka/current/scala/actors.html)
+  - [Persistence](http://doc.akka.io/docs/akka/current/scala/persistence.html)
   
 ## Releasing new versions
    
@@ -174,12 +171,17 @@ For reference on this process, you may want to see the following links:
 - [SBT: Deploying to Sonatype](http://www.scala-sbt.org/0.13/docs/Using-Sonatype.html)
 - [SBT-PGP Usage docs](http://www.scala-sbt.org/sbt-pgp/usage.html)
 - [The Central Repository: Releasing The Deployment](http://central.sonatype.org/pages/releasing-the-deployment.html)
+- [Complete guide to continuous deployment to maven central from Travis CI](http://www.debonair.io/post/maven-cd/)
   
 ## Todos
 
 - Testing of complicated random flows of events, validations, and timeouts.
   
 ## Changelog
+
+*0.0.6*
+- Bump Akka version to 2.5.1
+- Add [CircleCI](https://circleci.com/gh/artsy/atomic-store) with automated push to Sonatype/Maven Central
 
 *0.0.5*
 - Add `meta` field to validation process to allow validation code to pass back arbitrary additional information.

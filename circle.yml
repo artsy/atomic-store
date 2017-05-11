@@ -26,6 +26,5 @@ deployment:
      - sbt publishSigned
   production:
     branch: master
-    commands: 
-     - sbt publishSigned
-     - sbt sonatypeRelease
+    commands:
+     - sbt ";publishSigned;sonatypeRelease"

@@ -23,7 +23,7 @@ deployment:
   staging:
     branch: development
     commands: 
-     - sbt ";sonatypeOpen 'net.artsy';publishSigned"
+     - sbt publishSigned
   production:
     branch: master
     commands:

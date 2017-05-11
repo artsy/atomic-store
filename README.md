@@ -6,6 +6,8 @@
 * __Point People:__ [@acjay](https://github.com/acjay)
 * __Point People:__ [@bhoggard](https://github.com/bhoggard)
 
+[![CircleCI](https://circleci.com/gh/artsy/atomic-store.svg?style=svg)](https://circleci.com/gh/artsy/atomic-store)
+
 Atomic Store is a system for managing persistent streams of atomic events, with strict consistency. It is intended for systems in which only one event can be admitted to a canonical event log at a time, contingent upon past events. It exists to maintain the atomicity of handling of incoming events, but outsources the actual validation logic back to the event originator. In a sense, the idea here is to do as little as possible to meet this goal, but in a way that is as practical as possible.
 
 ## Philosophy

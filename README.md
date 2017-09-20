@@ -181,6 +181,11 @@ For reference on this process, you may want to see the following links:
   
 ## Changelog
 
+*0.0.7*
+- Bump Akka version to 2.5.4.
+- Cross publish for Scala 2.11 and 2.12.
+- Clean up build file.
+
 *0.0.6*
 - Bump Akka version to 2.5.1
 - Add [CircleCI](https://circleci.com/gh/artsy/atomic-store) with automated push to Sonatype/Maven Central

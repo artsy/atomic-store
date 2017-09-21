@@ -22,11 +22,18 @@ developers   in ThisBuild :=  List(
                                   name  = "Alan Johnson",
                                   email = "alan@breakrs.com",
                                   url   = url("http://www.acjay.com")
+                                ),
+                                Developer(
+                                  id    = "bhoggard",
+                                  name  = "Barry Hoggard",
+                                  email = "",
+                                  url   = url("https://github.com/bhoggard")
                                 )
                               )
 scalaVersion in ThisBuild := "2.12.3"
 
 val akkaV = "2.5.4"
+
 lazy val root = project.in(file("."))
   .settings(
     crossScalaVersions := Seq("2.11.11", "2.12.3"),
@@ -55,5 +62,10 @@ lazy val root = project.in(file("."))
         Some("releases"  at nexus + "service/local/staging/deploy/maven2")
     },
     publishArtifact in Test := false,
+    {
+      val user = scala.util.Properties.envOrElse("SONATYPE_USER", "sonatype-user")
+      val pass = scala.util.Properties.envOrElse("SONATYPE_PASS", "password")
+      credentials += Credentials("Sonatype Nexus Repository Manager", "oss.sonatype.org", user, pass)
+    },
     pgpPassphrase := Some(scala.util.Properties.envOrElse("GPG_PASS", "gpg-password").toArray)
   )

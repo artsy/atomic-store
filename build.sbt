@@ -6,7 +6,7 @@ import scalariform.formatter.preferences._
 // Metadata and build publication settings
 
 name         in ThisBuild := """atomic-store"""
-version      in ThisBuild := "0.0.7-SNAPSHOT"
+version      in ThisBuild := "0.0.7"
 organization in ThisBuild := "net.artsy"
 homepage     in ThisBuild :=  Some(url("https://github.com/artsy/atomic-store"))
 licenses     in ThisBuild +=  ("MIT", url("https://opensource.org/licenses/MIT"))

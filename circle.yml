@@ -14,8 +14,7 @@ dependencies:
     - "~/.sbt"
 test:
   override:
-    - case $CIRCLE_NODE_INDEX in 0) sbt ++2.11.8 test ;; 1) sbt ++2.11.11 test ;; 2) sbt ++2.12.2 test ;; esac:
-        parallel: true
+    - sbt +test
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/junit/
     - find . -type f -regex ".*/target/test-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;

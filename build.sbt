@@ -5,38 +5,67 @@ import scalariform.formatter.preferences._
 
 // Metadata and build publication settings
 
-name := """atomic-store"""
+name         in ThisBuild := """atomic-store"""
+version      in ThisBuild := "0.0.7"
+organization in ThisBuild := "net.artsy"
+homepage     in ThisBuild :=  Some(url("https://github.com/artsy/atomic-store"))
+licenses     in ThisBuild +=  ("MIT", url("https://opensource.org/licenses/MIT"))
+scmInfo      in ThisBuild :=  Some(
+                                ScmInfo(
+                                  url("https://github.com/artsy/atomic-store"),
+                                  "scm:git@github.com:artsy/atomic-store.git"
+                                )
+                              )
+developers   in ThisBuild :=  List(
+                                Developer(
+                                  id    = "acjay",
+                                  name  = "Alan Johnson",
+                                  email = "alan@breakrs.com",
+                                  url   = url("http://www.acjay.com")
+                                ),
+                                Developer(
+                                  id    = "bhoggard",
+                                  name  = "Barry Hoggard",
+                                  email = "",
+                                  url   = url("https://github.com/bhoggard")
+                                )
+                              )
+scalaVersion in ThisBuild := "2.12.3"
 
-version := "0.0.6"
+val akkaV = "2.5.4"
 
-scalaVersion := "2.11.11"
-
-resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven"
-
-organization := "net.artsy"
-publishMavenStyle := true
-pgpPassphrase := Some(scala.util.Properties.envOrElse("GPG_PASS", "gpg-password").toArray)
-
-scalacOptions ++= Seq("-unchecked", "-deprecation")
-
-// Code settings
-
-val akkaV = "2.5.1"
-
-libraryDependencies ++= Seq(
-  "com.typesafe.akka"         %% "akka-actor"                 % akkaV,
-  "com.typesafe.akka"         %% "akka-testkit"               % akkaV,
-  "org.scalatest"             %% "scalatest"                  % "3.0.1"  % "test",
-  "org.scalacheck"            %% "scalacheck"                 % "1.13.4" % "test",    // Property-based testing
-  "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "2.5.0.0"
-)
-
-fork := true
-
-SbtScalariform.scalariformSettings
-
-ScalariformKeys.preferences := ScalariformKeys.preferences.value
-  .setPreference(AlignArguments, true)
-  .setPreference(AlignParameters, true)
-  .setPreference(AlignSingleLineCaseStatements, true)
-  .setPreference(DoubleIndentClassDeclaration, false)
+lazy val root = project.in(file("."))
+  .settings(
+    crossScalaVersions := Seq("2.11.11", "2.12.3"),
+    resolvers += "dnvriend at bintray" at "http://dl.bintray.com/dnvriend/maven",
+    libraryDependencies ++= Seq(
+      "com.typesafe.akka"         %% "akka-actor"                 % akkaV,
+      "com.typesafe.akka"         %% "akka-testkit"               % akkaV,
+      "org.scalatest"             %% "scalatest"                  % "3.0.1"  % "test",
+      "org.scalacheck"            %% "scalacheck"                 % "1.13.4" % "test",    // Property-based testing
+      "com.github.dnvriend"       %% "akka-persistence-inmemory"  % "2.5.0.0"
+    ),
+    fork := true,
+    SbtScalariform.scalariformSettings,
+    ScalariformKeys.preferences := ScalariformKeys.preferences.value
+      .setPreference(AlignArguments, true)
+      .setPreference(AlignParameters, true)
+      .setPreference(AlignSingleLineCaseStatements, true)
+      .setPreference(DoubleIndentClassDeclaration, false),
+    moduleName := "atomic-store",
+    publishMavenStyle := true,
+    publishTo := {
+      val nexus = "https://oss.sonatype.org/"
+      if (isSnapshot.value)
+        Some("snapshots" at nexus + "content/repositories/snapshots")
+      else
+        Some("releases"  at nexus + "service/local/staging/deploy/maven2")
+    },
+    publishArtifact in Test := false,
+    {
+      val user = scala.util.Properties.envOrElse("SONATYPE_USER", "sonatype-user")
+      val pass = scala.util.Properties.envOrElse("SONATYPE_PASS", "password")
+      credentials += Credentials("Sonatype Nexus Repository Manager", "oss.sonatype.org", user, pass)
+    },
+    pgpPassphrase := Some(scala.util.Properties.envOrElse("GPG_PASS", "gpg-password").toArray)
+  )

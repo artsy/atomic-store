@@ -1,8 +1,12 @@
-#Atomic Store
+# Atomic Store
+
+## Deprecation notice
+
+We stopped using this library in production at Artsy in early December 2017. It served us well for 18 months, but we opted for another approach for managing an atomic event log, relying on row-based database locks and serializing the event record as a JSON list. Feel free to use it if it suits your purposes, but this repository will no longer be maintained.
 
 ## Meta
 
-* __State:__ production
+* __State:__ **deprecated**
 * __Point People:__ [@acjay](https://github.com/acjay)
 * __Point People:__ [@bhoggard](https://github.com/bhoggard)
 
